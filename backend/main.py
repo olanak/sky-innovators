@@ -11,6 +11,7 @@ import os # NEW: To save files to the computer
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
 import json
+from dotenv import load_dotenv
 
 # Import our database setup, models, and new schemas
 from database import engine, Base, get_db
@@ -58,9 +59,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         hashed_password.encode('utf-8')
     )
 
+
 # NEW: JWT Token Settings
-# In a real app, keep this string secret and store it in a .env file!
-SECRET_KEY = "sky_innovators_super_secret_key_change_me"
+load_dotenv() # <-- This tells Python to read the .env file
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback_secret_if_env_is_missing")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Tokens last for 7 days
 
