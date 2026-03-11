@@ -1,112 +1,252 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
-export default function MediaLibrary() {
-  const [viewMode, setViewMode] = useState('grid'); 
+export default function MediaLibrary({ onAnalyze, onView }) {
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  
+  const fileInputRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const dummyFiles = [
-    { id: 1, name: 'Sector_7_Pipeline_Scan.mp4', type: 'Video', size: '1.2 GB', date: 'Oct 24, 2025', status: 'Completed', duration: '14:20' },
-    { id: 2, name: 'Agricultural_Yield_Map.tiff', type: 'Image', size: '450 MB', date: 'Oct 22, 2025', status: 'Completed', duration: '--' },
-    { id: 3, name: 'Urban_Expansion_Q3.mp4', type: 'Video', size: '3.4 GB', date: 'Oct 20, 2025', status: 'Processing', duration: '22:15' },
-    { id: 4, name: 'Coastal_Erosion_Survey.png', type: 'Image', size: '85 MB', date: 'Oct 15, 2025', status: 'Completed', duration: '--' },
-  ];
+  // Analyze Modal State
+  const [activeModalFile, setActiveModalFile] = useState(null);
+  const [selectedModules, setSelectedModules] = useState({ forestry: false, land: false, infrastructure: false });
+
+  // NEW: Custom Delete Modal State
+  const [deleteModalFile, setDeleteModalFile] = useState(null);
+
+  const fetchMedia = async () => {
+    try {
+      const token = localStorage.getItem('sky_token');
+      const response = await fetch("http://127.0.0.1:8000/media", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error("Failed to load media.");
+      const data = await response.json();
+      setMediaFiles(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchMedia(); }, []);
+
+  // --- ACTIONS ---
+
+  // NEW: Updated handle logic for the Custom Modal
+  const confirmDelete = async () => {
+    if (!deleteModalFile) return;
+    
+    try {
+      const token = localStorage.getItem('sky_token');
+      await fetch(`http://127.0.0.1:8000/media/${deleteModalFile.id}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      // Remove it from the UI immediately
+      setMediaFiles(prev => prev.filter(f => f.id !== deleteModalFile.id));
+    } catch (err) {
+      console.error("Failed to delete", err);
+    } finally {
+      // Close the modal whether it succeeded or failed
+      setDeleteModalFile(null);
+    }
+  };
+
+  const handleQuickUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    const token = localStorage.getItem('sky_token');
+    
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("modules", JSON.stringify([])); 
+
+    await fetch("http://127.0.0.1:8000/upload", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+      body: formData,
+    });
+    
+    setIsUploading(false);
+    fetchMedia(); 
+  };
+
+  const handleStartAnalysis = async () => {
+    const modulesToRun = Object.keys(selectedModules).filter(k => selectedModules[k]);
+    const token = localStorage.getItem('sky_token');
+    
+    await fetch(`http://127.0.0.1:8000/media/${activeModalFile.id}/analyze`, {
+      method: "PUT",
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+
+    onAnalyze({
+      filename: activeModalFile.filename,
+      modules: modulesToRun,
+      isCompleted: false 
+    });
+  };
+
+  const getFileIcon = (filename) => {
+    if (filename.endsWith('.mp4') || filename.endsWith('.mov')) {
+      return <svg className="w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>;
+    }
+    return <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
+  };
 
   return (
-    <div className="max-w-6xl mx-auto p-8 animate-fade-in w-full transition-colors duration-300">
-      
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div className="max-w-7xl mx-auto p-6 lg:p-8 animate-fade-in">
+      <div className="flex justify-between items-center mb-8">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight transition-colors">Media Library</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 transition-colors">Manage and review all uploaded drone telemetry and footage.</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Media Library</h1>
         </div>
         
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <input type="text" placeholder="Search files..." className="pl-9 pr-4 py-2 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:border-cyan-500 transition-all w-64 dark:placeholder-gray-500" />
-          </div>
-          
-          <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg transition-colors">
-            <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-            </button>
-            <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </button>
-          </div>
-        </div>
+        <input type="file" ref={fileInputRef} className="hidden" onChange={handleQuickUpload} />
+        <button 
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-colors"
+        >
+          {isUploading ? (
+             <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
+          ) : (
+             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+          )}
+          {isUploading ? 'Uploading...' : 'Upload Media'}
+        </button>
       </div>
 
-      {viewMode === 'grid' && (
+      {/* --- GRID --- */}
+      {isLoading ? (
+        <div className="flex justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mt-20"></div></div>
+      ) : mediaFiles.length === 0 ? (
+        <p className="text-center text-gray-500 mt-20">No media found. Upload something to get started!</p>
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {dummyFiles.map((file) => (
-            <div key={file.id} className="border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-2xl overflow-hidden hover:shadow-lg hover:border-cyan-200 dark:hover:border-cyan-800 transition-all group cursor-pointer">
-              <div className="h-32 bg-gray-100 dark:bg-gray-700 relative flex items-center justify-center overflow-hidden transition-colors">
-                <div className="absolute inset-0 bg-gradient-to-tr from-gray-200 to-gray-50 dark:from-gray-700 dark:to-gray-800"></div>
-                <svg className="w-10 h-10 text-gray-300 dark:text-gray-600 relative z-10 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {file.type === 'Video' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />}
-                </svg>
-                <div className="absolute top-2 right-2">
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide transition-colors ${file.status === 'Completed' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 animate-pulse'}`}>
-                    {file.status}
-                  </span>
-                </div>
+          {mediaFiles.map((file) => (
+            <div key={file.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm group hover:border-cyan-300 dark:hover:border-cyan-800 transition-all">
+              <div className="h-32 bg-gray-50 dark:bg-gray-900 flex items-center justify-center border-b border-gray-100 dark:border-gray-700 relative">
+                {file.filename.endsWith('.mp4') ? getFileIcon(file.filename) : (
+                  <img src={`http://127.0.0.1:8000/static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
+                )}
+                <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
+                    file.status === 'Uploaded' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                }`}>{file.status}</span>
+              </div>
+              <div className="p-4">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate mb-1">{file.filename.split('_').pop()}</h3>
               </div>
               
-              <div className="p-4 transition-colors">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">{file.name}</h3>
-                <div className="flex justify-between items-center mt-2 text-xs text-gray-500 dark:text-gray-400 transition-colors">
-                  <span>{file.size}</span>
-                  <span>{file.date}</span>
-                </div>
+              <div className="px-4 pb-4 flex gap-2">
+                {file.status === 'Uploaded' ? (
+                  <button 
+                    onClick={() => setActiveModalFile(file)}
+                    className="flex-1 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-100 font-bold text-xs py-2 rounded-lg transition-colors"
+                  >
+                    Analyze
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => onView({ filename: file.filename, modules: ['forestry', 'land'], isCompleted: true })}
+                    className="flex-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 font-bold text-xs py-2 rounded-lg transition-colors"
+                  >
+                    View Report
+                  </button>
+                )}
+                
+                {/* NEW: Open custom modal instead of window.confirm */}
+                <button 
+                  onClick={() => setDeleteModalFile(file)} 
+                  className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                  title="Delete File"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {viewMode === 'list' && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl overflow-hidden transition-colors">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors">
-                <th className="p-4 font-medium">File Name</th>
-                <th className="p-4 font-medium">Status</th>
-                <th className="p-4 font-medium">Size</th>
-                <th className="p-4 font-medium">Duration</th>
-                <th className="p-4 font-medium">Upload Date</th>
-                <th className="p-4 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {dummyFiles.map((file) => (
-                <tr key={file.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group cursor-pointer">
-                  <td className="p-4 flex items-center gap-3">
-                    <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 group-hover:bg-cyan-50 dark:group-hover:bg-cyan-900/30 group-hover:text-cyan-500 dark:group-hover:text-cyan-400 transition-colors">
-                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        {file.type === 'Video' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />}
-                      </svg>
+      {/* --- ANALYZE POP-UP MODAL --- */}
+      {activeModalFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-md overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl">
+            <div className="p-6">
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">{getFileIcon(activeModalFile.filename)}</div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 dark:text-white truncate w-48">{activeModalFile.filename.split('_').pop()}</h3>
+                    <p className="text-xs text-gray-500">Ready for processing</p>
+                  </div>
+                </div>
+                <button onClick={() => setActiveModalFile(null)} className="text-gray-400 hover:text-gray-600 transition-colors"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+              </div>
+
+              <div className="space-y-2 mb-8">
+                {Object.entries({ forestry: "🌳 Forestry", land: "🌾 Land Health", infrastructure: "🛣️ Infrastructure" }).map(([key, name]) => (
+                  <label key={key} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedModules[key] ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
+                    <span className={`text-sm font-medium ${selectedModules[key] ? 'text-cyan-700 dark:text-cyan-300' : 'text-gray-600 dark:text-gray-400'}`}>{name}</span>
+                    <input type="checkbox" className="hidden" checked={selectedModules[key]} onChange={() => setSelectedModules(prev => ({...prev, [key]: !prev[key]}))} />
+                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedModules[key] ? 'bg-cyan-500' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                      <div className={`w-4 h-4 rounded-full bg-white transition-transform ${selectedModules[key] ? 'translate-x-4' : 'translate-x-0'}`}></div>
                     </div>
-                    <span className="text-sm font-semibold text-gray-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">{file.name}</span>
-                  </td>
-                  <td className="p-4">
-                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide transition-colors ${file.status === 'Completed' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'}`}>
-                      {file.status}
-                    </span>
-                  </td>
-                  <td className="p-4 text-sm text-gray-500 dark:text-gray-400 transition-colors">{file.size}</td>
-                  <td className="p-4 text-sm text-gray-500 dark:text-gray-400 transition-colors">{file.duration}</td>
-                  <td className="p-4 text-sm text-gray-500 dark:text-gray-400 transition-colors">{file.date}</td>
-                  <td className="p-4 text-right">
-                    <button className="text-gray-400 dark:text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </label>
+                ))}
+              </div>
+
+              <button 
+                onClick={handleStartAnalysis}
+                disabled={!Object.values(selectedModules).some(v => v)}
+                className="w-full bg-cyan-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all"
+              >
+                Begin AI Extraction
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* --- NEW: CUSTOM DELETE CONFIRMATION MODAL --- */}
+      {deleteModalFile && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Delete Media</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 px-2">
+                Are you sure you want to permanently delete <span className="font-bold text-gray-700 dark:text-gray-300">"{deleteModalFile.filename.split('_').pop()}"</span>? This action cannot be undone.
+              </p>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setDeleteModalFile(null)} 
+                  className="flex-1 py-3 rounded-xl font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmDelete} 
+                  className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-500/20 transition-all hover:scale-[1.02]"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

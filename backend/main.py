@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, status
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import time
@@ -7,17 +7,25 @@ import bcrypt
 from pydantic import BaseModel
 import jwt # <-- Add this
 from datetime import datetime, timedelta # <-- Add this
+import os # NEW: To save files to the computer
+from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
+import json
 
 # Import our database setup, models, and new schemas
 from database import engine, Base, get_db
 import models
 import schemas
+#from tkinter.tix import Form
 
 # Create the database tables if they don't exist yet
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Sky Innovators API")
 
+UPLOAD_DIR = "uploaded_media"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 # Setup Password Hashing
 #pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -62,6 +70,31 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+# --- SECURITY DEPENDENCY ---
+# This tells FastAPI where to look for the token
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        # Decode the token using our secret master password
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+        
+    # Find the user in the database
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user is None:
+        raise credentials_exception
+    return user
 
 # NEW: Login Request Schema
 class LoginRequest(BaseModel):
@@ -138,23 +171,71 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
         }
     }
 
-# (Your existing /upload route stays down here)
+# Create a folder to store the physical files if it doesn't exist yet
+UPLOAD_DIR = "uploaded_media"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
 @app.post("/upload")
-async def upload_drone_footage(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    file_size_mb = 12.5 
+async def upload_drone_footage(
+    file: UploadFile = File(...), 
+    modules: str = Form(...), 
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user) 
+):
+    file_bytes = await file.read()
+    file_size_mb = round(len(file_bytes) / (1024 * 1024), 2)
+    
+    timestamp = int(time.time())
+    safe_filename = f"{timestamp}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    with open(file_path, "wb") as f:
+        f.write(file_bytes)
+    
+    # NEW LOGIC: If they didn't select any modules, status is "Uploaded". Otherwise "Processing".
+    parsed_modules = json.loads(modules)
+    initial_status = "Uploaded" if len(parsed_modules) == 0 else "Processed"
+        
     new_media = models.MediaFile(
-        filename=file.filename,
+        filename=safe_filename, # Save the safe name so we can serve it later
+        file_path=file_path, 
         file_size_mb=file_size_mb,
-        status="Processing",
-        owner_id=None 
+        status=initial_status,
+        owner_id=current_user.id 
     )
+    
     db.add(new_media)
     db.commit()
     db.refresh(new_media)
-    time.sleep(1) 
-    return {
-        "status": "success",
-        "filename": new_media.filename,
-        "database_id": new_media.id,
-        "message": "File securely recorded in the database and queued for AI analysis."
-    }
+    
+    return {"status": "success", "file": new_media}
+
+@app.get("/media")
+def get_user_media(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return db.query(models.MediaFile).filter(models.MediaFile.owner_id == current_user.id).order_by(models.MediaFile.id.desc()).all()
+
+# NEW: Route to permanently delete a file
+@app.delete("/media/{media_id}")
+def delete_media(media_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    media_item = db.query(models.MediaFile).filter(models.MediaFile.id == media_id, models.MediaFile.owner_id == current_user.id).first()
+    if not media_item:
+        raise HTTPException(status_code=404, detail="Media not found")
+    
+    # Delete the physical file
+    if os.path.exists(media_item.file_path):
+        os.remove(media_item.file_path)
+        
+    # Delete from database
+    db.delete(media_item)
+    db.commit()
+    return {"message": "Deleted"}
+
+# NEW: Route to update status from 'Uploaded' to 'Processed'
+@app.put("/media/{media_id}/analyze")
+def analyze_media(media_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    media_item = db.query(models.MediaFile).filter(models.MediaFile.id == media_id, models.MediaFile.owner_id == current_user.id).first()
+    if media_item:
+        media_item.status = "Processed"
+        db.commit()
+    return {"message": "Updated"}
