@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 import time
 import hashlib
 import bcrypt
+from pydantic import BaseModel
+import jwt # <-- Add this
+from datetime import datetime, timedelta # <-- Add this
 
 # Import our database setup, models, and new schemas
 from database import engine, Base, get_db
@@ -27,6 +30,44 @@ def get_password_hash(password: str) -> str:
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
     # Decode back to a normal string so PostgreSQL can save it
     return hashed_password.decode('utf-8')
+
+
+# --- Pure Bcrypt Password Hashing ---
+def get_password_hash(password: str) -> str:
+    fixed_length_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    pwd_bytes = fixed_length_password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+    return hashed_password.decode('utf-8')
+
+# NEW: Password Verification function
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # We must apply the exact same SHA-256 transformation to the incoming password
+    fixed_length_password = hashlib.sha256(plain_password.encode('utf-8')).hexdigest()
+    # Check if it matches the hash stored in PostgreSQL
+    return bcrypt.checkpw(
+        fixed_length_password.encode('utf-8'), 
+        hashed_password.encode('utf-8')
+    )
+
+# NEW: JWT Token Settings
+# In a real app, keep this string secret and store it in a .env file!
+SECRET_KEY = "sky_innovators_super_secret_key_change_me"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Tokens last for 7 days
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# NEW: Login Request Schema
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 
 # CORS setup
 origins = [
@@ -70,6 +111,32 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     
     return new_user
+
+@app.post("/login")
+def login_user(request: LoginRequest, db: Session = Depends(get_db)):
+    # 1. Find the user by their email in the database
+    user = db.query(models.User).filter(models.User.email == request.email).first()
+    
+    # 2. If the user doesn't exist, or the password doesn't match, reject them
+    if not user or not verify_password(request.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 3. If credentials are correct, generate the digital wristband (JWT)
+    access_token = create_access_token(data={"sub": user.email, "id": user.id})
+    
+    # 4. Return the token to the React frontend
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user_info": {
+            "name": user.full_name,
+            "email": user.email
+        }
+    }
 
 # (Your existing /upload route stays down here)
 @app.post("/upload")

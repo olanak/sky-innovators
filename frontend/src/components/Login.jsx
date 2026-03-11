@@ -7,20 +7,26 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState(''); 
   
-  const [isLoginView, setIsLoginView] = useState(false);
+  const [isLoginView, setIsLoginView] = useState(true);
   const [isLoading, setIsLoading] = useState(false); 
   
   const [errorMessage, setErrorMessage] = useState(''); 
   const [successMessage, setSuccessMessage] = useState(''); 
   
   const navigate = useNavigate();
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  // 1. Initialize state by checking if they previously saved a dark theme preference
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('sky_theme') === 'dark';
+  });
 
+  // 2. Update the HTML class AND save their choice to localStorage whenever they click the toggle
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('sky_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('sky_theme', 'light');
     }
   }, [isDarkMode]);
 
@@ -91,6 +97,7 @@ export default function Login() {
     return null;
   };
 
+// --- MAIN AUTHENTICATION HANDLER ---
   const handleAuth = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -98,12 +105,35 @@ export default function Login() {
     setIsLoading(true);
 
     if (!isLoginView) {
-      // Sign up request to backend
+      // --- SIGN UP LOGIC ---
+      if (!validateEmail(email)) {
+        setErrorMessage("Please enter a valid email address.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setErrorMessage("Passwords do not match. Please try again.");
+        setIsLoading(false);
+        return;
+      }
+
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        setErrorMessage(passwordError);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const response = await fetch("http://127.0.0.1:8000/signup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, full_name: fullName }),
+          body: JSON.stringify({
+            email: email,
+            password: password,
+            full_name: fullName || "Sky Innovators User"
+          }),
         });
 
         const data = await response.json();
@@ -123,9 +153,40 @@ export default function Login() {
         setIsLoading(false);
       }
     } else {
-      navigate('/dashboard');
+      // --- LOG IN LOGIC ---
+      try {
+        const response = await fetch("http://127.0.0.1:8000/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: email,
+            password: password,
+          }),
+        });
+
+        const data = await response.json();
+
+        // If Python rejects the credentials (e.g., wrong password or email)
+        if (!response.ok) {
+          throw new Error(data.detail || "Invalid email or password");
+        }
+
+        // Success! Save the token and user data to the browser
+        localStorage.setItem("sky_token", data.access_token);
+        localStorage.setItem("sky_user", JSON.stringify(data.user_info));
+
+        // Route them securely to the dashboard
+        navigate('/dashboard');
+
+      } catch (error) {
+        // Display the "Invalid email or password" message in the red UI box
+        setErrorMessage(error.message);
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
+
 
   return (
     <div className="flex min-h-screen bg-white dark:bg-gray-900 font-sans text-gray-900 dark:text-white transition-colors duration-300">
@@ -158,7 +219,7 @@ export default function Login() {
               }} 
               className="text-gray-900 dark:text-white font-semibold hover:underline focus:outline-none"
             >
-              {isLoginView ? "Sign up" : "Log in"}
+              {isLoginView ? "Sign up" : "Sign in"}
             </button>
           </p>
 
