@@ -108,7 +108,7 @@ class LoginRequest(BaseModel):
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://sky-innovators.vercel.app",
+    "https://sky-innovators-buotqlix6-olanaks-projects.vercel.app",
 ]
 
 app.add_middleware(
