@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { API_URL } from 'config.js'; // Adjust path if needed
 
 export default function MediaLibrary({ onAnalyze, onView }) {
   const [mediaFiles, setMediaFiles] = useState([]);
