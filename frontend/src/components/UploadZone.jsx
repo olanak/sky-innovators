@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { API_URL } from 'config.js';
+import { API_URL } from '../config.js';
 // Notice we are passing in BOTH preselectedModule and onUploadSuccess here!
 export default function UploadZone({ preselectedModule, onUploadSuccess }) {
   const [isDragging, setIsDragging] = useState(false);
