@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Projects from './pro';
 import UploadZone from './UploadZone';
-import AIModels from './AIModel';
+import AIModels from './AImodel';
 import TelemetryData from './TelemetryData';
 import ExportedReports from './ExportedReports';
 import AccountSettings from './AccountSettings';
