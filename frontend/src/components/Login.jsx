@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_URL } from 'config.js'; // Adjust path if needed
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -126,7 +127,7 @@ export default function Login() {
       }
 
       try {
-        const response = await fetch("http://127.0.0.1:8000/signup", {
+        const response = await fetch('${API_URL}/signup', {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -155,7 +156,7 @@ export default function Login() {
     } else {
       // --- LOG IN LOGIC ---
       try {
-        const response = await fetch("http://127.0.0.1:8000/login", {
+        const response = await fetch('${API_URL}/login', {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

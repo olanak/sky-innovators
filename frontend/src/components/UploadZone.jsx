@@ -50,7 +50,7 @@ export default function UploadZone({ preselectedModule, onUploadSuccess }) {
     formData.append("modules", JSON.stringify(modulesToRun));
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/upload", {
+      const response = await fetch(`${API_URL}/upload`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` },
         body: formData,

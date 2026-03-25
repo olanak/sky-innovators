@@ -1,20 +1,30 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
 
-# NOTE: Replace 'postgres:password' with your actual PostgreSQL username and password.
-# 'skyinnovators' is the name of the database we are going to use.
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:%40Kenne345@localhost/skyinnovators"
+# 1. Load the .env file so we can read the SECRET_KEY and DATABASE_URL
+load_dotenv()
 
-# Create the engine that manages the connection
+# 2. Get the URL from the environment variable (Render/Neon)
+# If it doesn't exist, it uses your local PostgreSQL as the fallback
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "postgresql://postgres:%40Kenne345@localhost/skyinnovators"
+)
+
+# 3. CRITICAL FIX: SQLAlchemy requires 'postgresql://', 
+# but many cloud providers (like Render/Heroku) provide 'postgres://'
+if SQLALCHEMY_DATABASE_URL and SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# 4. Create the engine
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
-# Create a session factory to talk to the database
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# This is the base class all of our database models will inherit from
 Base = declarative_base()
 
-# Dependency to get a database session for our API routes
 def get_db():
     db = SessionLocal()
     try:
