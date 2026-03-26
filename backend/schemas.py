@@ -14,3 +14,25 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Add this to the bottom of schemas.py
+
+# What we expect from React when creating a project
+class ProjectCreate(BaseModel):
+    title: str
+    client: str
+    location: str
+    description: str = None
+
+# What we send back to React
+class ProjectResponse(BaseModel):
+    id: int
+    title: str
+    client: str
+    location: str
+    description: str | None = None
+    status: str
+    progress: int
+
+    class Config:
+        from_attributes = True

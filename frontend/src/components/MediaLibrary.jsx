@@ -132,7 +132,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
             <div key={file.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm group hover:border-cyan-300 dark:hover:border-cyan-800 transition-all">
               <div className="h-32 bg-gray-50 dark:bg-gray-900 flex items-center justify-center border-b border-gray-100 dark:border-gray-700 relative">
                 {file.filename.endsWith('.mp4') ? getFileIcon(file.filename) : (
-                  <img src={`http://127.0.0.1:8000/static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
+                  <img src={`${API_URL}static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
                 )}
                 <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
                     file.status === 'Uploaded' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'

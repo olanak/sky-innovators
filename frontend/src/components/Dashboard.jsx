@@ -52,7 +52,7 @@ export default function Dashboard() {
   const handleLogout = () => {
     localStorage.removeItem('sky_token');
     localStorage.removeItem('sky_user');
-    navigate('/login');
+    navigate('/');
   };
 
   if (isAuthChecking) {
@@ -100,10 +100,7 @@ export default function Dashboard() {
 
         {/* User Profile Area */}
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 relative">
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl p-3 mb-3 border border-yellow-100 dark:border-yellow-900/30 flex justify-between items-center cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors">
-            <span className="text-sm font-semibold text-yellow-800 dark:text-yellow-500">💎 Upgrade Plan</span>
-          </div>
-
+          
           <div
             onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"

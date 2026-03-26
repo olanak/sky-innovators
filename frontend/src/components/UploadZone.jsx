@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { API_URL } from '../config.js';
+
 // Notice we are passing in BOTH preselectedModule and onUploadSuccess here!
-export default function UploadZone({ preselectedModule, onUploadSuccess }) {
+export default function UploadZone({ preselectedModule, onUploadSuccess, projectId }) {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -48,6 +49,9 @@ export default function UploadZone({ preselectedModule, onUploadSuccess }) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("modules", JSON.stringify(modulesToRun));
+    if (projectId) {
+      formData.append("project_id", projectId);
+    }
 
     try {
       const response = await fetch(`${API_URL}upload`, {

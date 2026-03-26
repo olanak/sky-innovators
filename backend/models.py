@@ -15,6 +15,24 @@ class User(Base):
     media = relationship("MediaFile", back_populates="owner")
 
 
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    client = Column(String)
+    location = Column(String)
+    description = Column(String, nullable=True)
+    status = Column(String, default="Planning")
+    progress = Column(Integer, default=0)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    
+    owner = relationship("User", backref="projects")
+    # 👉 NEW: Tell the Project it owns multiple media files
+    assets = relationship("MediaFile", back_populates="project") 
+
+
 class MediaFile(Base):
     __tablename__ = "media_files"
 
@@ -25,5 +43,9 @@ class MediaFile(Base):
     status = Column(String, default="Processing")
     owner_id = Column(Integer, ForeignKey("users.id"))
     
-    # This side was already here, looking for the 'media' property above!
+    # 👉 NEW: Add a column for the Project ID
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True) 
+    
     owner = relationship("User", back_populates="media")
+    # 👉 NEW: Link back to the Project
+    project = relationship("Project", back_populates="assets")
