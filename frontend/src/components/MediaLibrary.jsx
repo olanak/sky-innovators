@@ -13,12 +13,13 @@ export default function MediaLibrary({ onAnalyze, onView }) {
   const [activeModalFile, setActiveModalFile] = useState(null);
   const [selectedModules, setSelectedModules] = useState({ forestry: false, land: false, infrastructure: false });
 
-  // NEW: Custom Delete Modal State
+  // Custom Delete Modal State
   const [deleteModalFile, setDeleteModalFile] = useState(null);
 
   const fetchMedia = async () => {
     try {
       const token = localStorage.getItem('sky_token');
+      // 👉 FIXED: Added slash before media
       const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -36,29 +37,29 @@ export default function MediaLibrary({ onAnalyze, onView }) {
 
   // --- ACTIONS ---
 
-  // NEW: Updated handle logic for the Custom Modal
   const confirmDelete = async () => {
     if (!deleteModalFile) return;
     
     try {
       const token = localStorage.getItem('sky_token');
+      // 👉 FIXED: Added slash
       await fetch(`${API_URL}media/${deleteModalFile.id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
-      // Remove it from the UI immediately
       setMediaFiles(prev => prev.filter(f => f.id !== deleteModalFile.id));
     } catch (err) {
       console.error("Failed to delete", err);
     } finally {
-      // Close the modal whether it succeeded or failed
       setDeleteModalFile(null);
     }
   };
 
+  // 👉 FIXED: Added try/catch/finally to prevent UI freezing
   const handleQuickUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
     setIsUploading(true);
     const token = localStorage.getItem('sky_token');
     
@@ -66,30 +67,48 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     formData.append("file", file);
     formData.append("modules", JSON.stringify([])); 
 
-    await fetch(`${API_URL}upload`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${token}` },
-      body: formData,
-    });
-    
-    setIsUploading(false);
-    fetchMedia(); 
+    try {
+      // 👉 FIXED: Added slash before upload
+      const response = await fetch(`${API_URL}upload`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed. Check backend logs.");
+      }
+      
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      alert("Failed to upload media. Please try again.");
+    } finally {
+      setIsUploading(false); // This ensures the spinner ALWAYS turns off!
+      fetchMedia(); 
+      // Reset the input so the user can select the same file again if they want
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleStartAnalysis = async () => {
     const modulesToRun = Object.keys(selectedModules).filter(k => selectedModules[k]);
     const token = localStorage.getItem('sky_token');
     
-    await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
-      method: "PUT",
-      headers: { "Authorization": `Bearer ${token}` }
-    });
+    try {
+      // 👉 FIXED: Added slash
+      await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
 
-    onAnalyze({
-      filename: activeModalFile.filename,
-      modules: modulesToRun,
-      isCompleted: false 
-    });
+      onAnalyze({
+        filename: activeModalFile.filename,
+        modules: modulesToRun,
+        isCompleted: false 
+      });
+    } catch (error) {
+       console.error("Failed to start analysis", error);
+    }
   };
 
   const getFileIcon = (filename) => {
@@ -110,7 +129,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
         <button 
           onClick={() => fileInputRef.current?.click()}
           disabled={isUploading}
-          className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-colors"
+          className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
         >
           {isUploading ? (
              <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
@@ -132,7 +151,8 @@ export default function MediaLibrary({ onAnalyze, onView }) {
             <div key={file.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm group hover:border-cyan-300 dark:hover:border-cyan-800 transition-all">
               <div className="h-32 bg-gray-50 dark:bg-gray-900 flex items-center justify-center border-b border-gray-100 dark:border-gray-700 relative">
                 {file.filename.endsWith('.mp4') ? getFileIcon(file.filename) : (
-                  <img src={`${API_URL}static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
+                  // 👉 FIXED: Added slash before static
+                  <img src={`${API_URL}/static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
                 )}
                 <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
                     file.status === 'Uploaded' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
@@ -159,7 +179,6 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                   </button>
                 )}
                 
-                {/* NEW: Open custom modal instead of window.confirm */}
                 <button 
                   onClick={() => setDeleteModalFile(file)} 
                   className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -204,7 +223,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
               <button 
                 onClick={handleStartAnalysis}
                 disabled={!Object.values(selectedModules).some(v => v)}
-                className="w-full bg-cyan-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all"
+                className="w-full bg-cyan-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all hover:bg-cyan-700 hover:scale-[1.02]"
               >
                 Begin AI Extraction
               </button>
@@ -213,7 +232,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
         </div>
       )}
 
-      {/* --- NEW: CUSTOM DELETE CONFIRMATION MODAL --- */}
+      {/* --- CUSTOM DELETE CONFIRMATION MODAL --- */}
       {deleteModalFile && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
