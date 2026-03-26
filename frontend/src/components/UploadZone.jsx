@@ -50,7 +50,7 @@ export default function UploadZone({ preselectedModule, onUploadSuccess }) {
     formData.append("modules", JSON.stringify(modulesToRun));
 
     try {
-      const response = await fetch(`${API_URL}/upload`, {
+      const response = await fetch(`${API_URL}upload`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` },
         body: formData,

@@ -19,7 +19,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
   const fetchMedia = async () => {
     try {
       const token = localStorage.getItem('sky_token');
-      const response = await fetch(`${API_URL}/media`, {
+      const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (!response.ok) throw new Error("Failed to load media.");
@@ -42,7 +42,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     
     try {
       const token = localStorage.getItem('sky_token');
-      await fetch(`${API_URL}/media/${deleteModalFile.id}`, {
+      await fetch(`${API_URL}media/${deleteModalFile.id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -66,7 +66,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     formData.append("file", file);
     formData.append("modules", JSON.stringify([])); 
 
-    await fetch(`${API_URL}/upload`, {
+    await fetch(`${API_URL}upload`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}` },
       body: formData,
@@ -80,7 +80,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     const modulesToRun = Object.keys(selectedModules).filter(k => selectedModules[k]);
     const token = localStorage.getItem('sky_token');
     
-    await fetch(`${API_URL}/media/${activeModalFile.id}/analyze`, {
+    await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
       method: "PUT",
       headers: { "Authorization": `Bearer ${token}` }
     });
