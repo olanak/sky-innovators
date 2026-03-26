@@ -1,2 +1,20 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
+@media print {
+  /* Hide the sidebar, header, and buttons when printing */
+  aside, header, .no-print, button {
+    display: none !important;
+  }
+  
+  /* Reset the main container for full page width */
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  .animate-fade-in {
+    animation: none !important;
+  }
+}

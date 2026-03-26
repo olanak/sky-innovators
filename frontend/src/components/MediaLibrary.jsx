@@ -5,7 +5,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
   const [mediaFiles, setMediaFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -19,7 +19,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
   const fetchMedia = async () => {
     try {
       const token = localStorage.getItem('sky_token');
-      // 👉 FIXED: Added slash before media
+      // Using API_URL which includes the trailing slash
       const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -39,10 +39,9 @@ export default function MediaLibrary({ onAnalyze, onView }) {
 
   const confirmDelete = async () => {
     if (!deleteModalFile) return;
-    
+
     try {
       const token = localStorage.getItem('sky_token');
-      // 👉 FIXED: Added slash
       await fetch(`${API_URL}media/${deleteModalFile.id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
@@ -55,20 +54,18 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     }
   };
 
-  // 👉 FIXED: Added try/catch/finally to prevent UI freezing
   const handleQuickUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
+
     setIsUploading(true);
     const token = localStorage.getItem('sky_token');
-    
+
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("modules", JSON.stringify([])); 
+    formData.append("modules", JSON.stringify([]));
 
     try {
-      // 👉 FIXED: Added slash before upload
       const response = await fetch(`${API_URL}upload`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` },
@@ -78,36 +75,46 @@ export default function MediaLibrary({ onAnalyze, onView }) {
       if (!response.ok) {
         throw new Error("Upload failed. Check backend logs.");
       }
-      
+
     } catch (error) {
       console.error("Error uploading file:", error);
       alert("Failed to upload media. Please try again.");
     } finally {
-      setIsUploading(false); // This ensures the spinner ALWAYS turns off!
-      fetchMedia(); 
-      // Reset the input so the user can select the same file again if they want
+      setIsUploading(false);
+      fetchMedia();
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
+  // 👉 FIXED: Now correctly sends modules as Form data so backend can save AI results
   const handleStartAnalysis = async () => {
     const modulesToRun = Object.keys(selectedModules).filter(k => selectedModules[k]);
     const token = localStorage.getItem('sky_token');
-    
+
+    // Create FormData because backend uses Form(...)
+    const formData = new FormData();
+    formData.append("modules", JSON.stringify(modulesToRun));
+
     try {
-      // 👉 FIXED: Added slash
-      await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
+      const response = await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
         method: "PUT",
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { "Authorization": `Bearer ${token}` },
+        body: formData, // Sending the module list here
       });
 
-      onAnalyze({
-        filename: activeModalFile.filename,
-        modules: modulesToRun,
-        isCompleted: false 
-      });
+      if (response.ok) {
+        const result = await response.json();
+        setActiveModalFile(null); // Close modal
+
+        onAnalyze({
+          filename: activeModalFile.filename,
+          modules: modulesToRun,
+          isCompleted: false,
+          aiResults: result.results // Pass real data to the report
+        });
+      }
     } catch (error) {
-       console.error("Failed to start analysis", error);
+      console.error("Failed to start analysis", error);
     }
   };
 
@@ -124,17 +131,17 @@ export default function MediaLibrary({ onAnalyze, onView }) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Media Library</h1>
         </div>
-        
+
         <input type="file" ref={fileInputRef} className="hidden" onChange={handleQuickUpload} />
-        <button 
+        <button
           onClick={() => fileInputRef.current?.click()}
           disabled={isUploading}
           className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
         >
           {isUploading ? (
-             <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
+            <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
           ) : (
-             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
           )}
           {isUploading ? 'Uploading...' : 'Upload Media'}
         </button>
@@ -150,37 +157,54 @@ export default function MediaLibrary({ onAnalyze, onView }) {
           {mediaFiles.map((file) => (
             <div key={file.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm group hover:border-cyan-300 dark:hover:border-cyan-800 transition-all">
               <div className="h-32 bg-gray-50 dark:bg-gray-900 flex items-center justify-center border-b border-gray-100 dark:border-gray-700 relative">
-                {file.filename.endsWith('.mp4') ? getFileIcon(file.filename) : (
-                  // 👉 FIXED: Added slash before static
-                  <img src={`${API_URL}/static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
+                {file.filename.endsWith('.mp4') || file.filename.endsWith('.mov') ? getFileIcon(file.filename) : (
+                  <img src={`${API_URL}static/${file.filename}`} className="w-full h-full object-cover opacity-80" alt="thumb" />
                 )}
-                <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
-                    file.status === 'Uploaded' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                }`}>{file.status}</span>
+                <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${file.status === 'Uploaded' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                  }`}>{file.status}</span>
               </div>
               <div className="p-4">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate mb-1">{file.filename.split('_').pop()}</h3>
               </div>
-              
+
               <div className="px-4 pb-4 flex gap-2">
                 {file.status === 'Uploaded' ? (
-                  <button 
+                  <button
                     onClick={() => setActiveModalFile(file)}
                     className="flex-1 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-100 font-bold text-xs py-2 rounded-lg transition-colors"
                   >
                     Analyze
                   </button>
                 ) : (
-                  <button 
-                    onClick={() => onView({ filename: file.filename, modules: ['forestry', 'land'], isCompleted: true })}
+                  // Inside the map function in MediaLibrary.jsx, update the View Report button:
+                  <button
+                    onClick={async () => {
+                      const token = localStorage.getItem('sky_token');
+                      try {
+                        const response = await fetch(`${API_URL}media/${file.id}/results`, {
+                          headers: { "Authorization": `Bearer ${token}` }
+                        });
+                        const realResults = await response.json();
+
+                        onView({
+                          id: file.id,
+                          filename: file.filename,
+                          modules: Object.keys(realResults),
+                          isCompleted: true,
+                          aiResults: realResults // 👈 PASS REAL DATA HERE
+                        });
+                      } catch (error) {
+                        console.error("Failed to load results", error);
+                      }
+                    }}
                     className="flex-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 font-bold text-xs py-2 rounded-lg transition-colors"
                   >
                     View Report
                   </button>
                 )}
-                
-                <button 
-                  onClick={() => setDeleteModalFile(file)} 
+
+                <button
+                  onClick={() => setDeleteModalFile(file)}
                   className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                   title="Delete File"
                 >
@@ -212,7 +236,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                 {Object.entries({ forestry: "🌳 Forestry", land: "🌾 Land Health", infrastructure: "🛣️ Infrastructure" }).map(([key, name]) => (
                   <label key={key} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedModules[key] ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
                     <span className={`text-sm font-medium ${selectedModules[key] ? 'text-cyan-700 dark:text-cyan-300' : 'text-gray-600 dark:text-gray-400'}`}>{name}</span>
-                    <input type="checkbox" className="hidden" checked={selectedModules[key]} onChange={() => setSelectedModules(prev => ({...prev, [key]: !prev[key]}))} />
+                    <input type="checkbox" className="hidden" checked={selectedModules[key]} onChange={() => setSelectedModules(prev => ({ ...prev, [key]: !prev[key] }))} />
                     <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedModules[key] ? 'bg-cyan-500' : 'bg-gray-200 dark:bg-gray-700'}`}>
                       <div className={`w-4 h-4 rounded-full bg-white transition-transform ${selectedModules[key] ? 'translate-x-4' : 'translate-x-0'}`}></div>
                     </div>
@@ -220,7 +244,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                 ))}
               </div>
 
-              <button 
+              <button
                 onClick={handleStartAnalysis}
                 disabled={!Object.values(selectedModules).some(v => v)}
                 className="w-full bg-cyan-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all hover:bg-cyan-700 hover:scale-[1.02]"
@@ -242,21 +266,21 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
-              
+
               <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Delete Media</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 px-2">
                 Are you sure you want to permanently delete <span className="font-bold text-gray-700 dark:text-gray-300">"{deleteModalFile.filename.split('_').pop()}"</span>? This action cannot be undone.
               </p>
-              
+
               <div className="flex gap-3">
-                <button 
-                  onClick={() => setDeleteModalFile(null)} 
+                <button
+                  onClick={() => setDeleteModalFile(null)}
                   className="flex-1 py-3 rounded-xl font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  onClick={confirmDelete} 
+                <button
+                  onClick={confirmDelete}
                   className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-500/20 transition-all hover:scale-[1.02]"
                 >
                   Delete

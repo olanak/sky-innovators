@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Projects from './pro';
+import { API_URL } from '../config.js'; 
+import Projects from './pro'; 
 import UploadZone from './UploadZone';
 import AIModels from './model';      
 import TelemetryData from './TelemetryData';
@@ -16,8 +17,16 @@ export default function Dashboard() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [activeAnalysisData, setActiveAnalysisData] = useState(null);
   const navigate = useNavigate();
+  const [lastTab, setLastTab] = useState('Home');
 
-  // 1. Initialize state by checking localStorage
+  // Stats and Theme state
+  const [stats, setStats] = useState({
+    total_projects: 0,
+    total_files: 0,
+    total_area_scanned: '0 Ha',
+    active_models: 0
+  });
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return localStorage.getItem('sky_theme') === 'dark';
   });
@@ -25,7 +34,31 @@ export default function Dashboard() {
   const [user, setUser] = useState({ name: 'User', email: 'Loading...' });
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
-  // 2. The Security Guard & Theme Logic
+  // Fetch Dashboard Stats
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      const token = localStorage.getItem('sky_token');
+      if (!token) return;
+
+      try {
+        const response = await fetch(`${API_URL}dashboard/stats`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setStats(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch dashboard stats", error);
+      }
+    };
+
+    if (activeTab === 'Home') {
+      fetchDashboardData();
+    }
+  }, [activeTab]);
+
+  // Auth and Theme Logic
   useEffect(() => {
     const token = localStorage.getItem('sky_token');
     if (!token) {
@@ -59,13 +92,35 @@ export default function Dashboard() {
     return <div className="h-screen w-full bg-gray-50 dark:bg-gray-900 transition-colors duration-300"></div>;
   }
 
+  // Helper to handle Analysis view from Library or Projects
+  const handleViewAnalysis = async (asset) => {
+    setLastTab(activeTab);
+    const token = localStorage.getItem('sky_token');
+    try {
+      const response = await fetch(`${API_URL}media/${asset.id}/results`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const results = await response.json();
+        setActiveAnalysisData({
+          id: asset.id,
+          filename: asset.filename,
+          aiResults: results
+        });
+        setActiveTab('AnalysisReport');
+      }
+    } catch (error) {
+      console.error("Failed to load results", error);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-white dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-200 relative transition-colors duration-300">
 
       {/* 1. SIDEBAR */}
       <aside className="w-64 border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col justify-between overflow-y-auto transition-colors duration-300">
         <div>
-          <div className="p-5 flex items-center gap-2 cursor-pointer">
+          <div className="p-5 flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('Home')}>
             <div className="w-6 h-6 bg-gradient-to-br from-cyan-400 to-blue-500 rounded flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
             </div>
@@ -74,7 +129,11 @@ export default function Dashboard() {
 
           <div className="px-4 pb-4">
             <button
-              onClick={() => { setActiveAnalysisModule(null); setIsUploadModalOpen(true); }}
+              onClick={() => { 
+                setActiveAnalysisData(null); // Ensure a clean state for new uploads
+                setActiveAnalysisModule(null); 
+                setIsUploadModalOpen(true); 
+              }}
               className="w-full bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
@@ -91,7 +150,7 @@ export default function Dashboard() {
           <div className="px-3 mt-6">
             <p className="px-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Assets</p>
             <nav className="space-y-1">
-              <NavItem icon="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" label="Media Library" active={activeTab === 'Media Library'} onClick={() => setActiveTab('Media Library')} />
+              <NavItem icon="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2-2v12a2 2 0 002 2z" label="Media Library" active={activeTab === 'Media Library'} onClick={() => setActiveTab('Media Library')} />
               <NavItem icon="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" label="Telemetry Data" active={activeTab === 'Telemetry Data'} onClick={() => setActiveTab('Telemetry Data')} />
               <NavItem icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" label="Exported Reports" active={activeTab === 'Exported Reports'} onClick={() => setActiveTab('Exported Reports')} />
             </nav>
@@ -100,7 +159,6 @@ export default function Dashboard() {
 
         {/* User Profile Area */}
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 relative">
-          
           <div
             onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -117,27 +175,22 @@ export default function Dashboard() {
             </svg>
           </div>
 
-          {/* Dropdown Menu */}
           {isProfileMenuOpen && (
-            <div className="absolute bottom-full left-4 mb-2 w-56 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-black/50 overflow-hidden z-50 animate-fade-in">
+            <div className="absolute bottom-full left-4 mb-2 w-56 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-xl z-50 animate-fade-in overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-50 dark:border-gray-700">
                 <p className="text-sm text-gray-900 dark:text-white font-medium">{user.name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
               </div>
               <div className="py-2">
                 <button
                   onClick={() => { setActiveTab('Settings'); setIsProfileMenuOpen(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-cyan-600 dark:hover:text-cyan-400 flex items-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                   Account Settings
                 </button>
               </div>
               <div className="border-t border-gray-50 dark:border-gray-700 py-2">
-                <button
-                  onClick={handleLogout}
-                  className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2"
-                >
+                <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                   Log Out
                 </button>
@@ -149,11 +202,14 @@ export default function Dashboard() {
 
       {/* 2. MAIN CONTENT AREA */}
       <main className="flex-1 overflow-y-auto bg-gray-50/30 dark:bg-gray-900 transition-colors duration-300">
-
-        {/* Header with Dark Mode Toggle */}
         <header className="flex justify-between items-center px-8 py-4 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 sticky top-0 z-10 transition-colors duration-300">
           <div className="flex items-center gap-4">
-            <button className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
+            <button 
+                onClick={() => setActiveTab('Home')}
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -166,38 +222,46 @@ export default function Dashboard() {
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
               )}
             </button>
-            <select className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm rounded-lg px-3 py-1.5 outline-none focus:border-cyan-400">
-              <option>EN</option>
-            </select>
             <button className="border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium py-1.5 px-4 rounded-full text-sm transition-colors">
               Documentation
             </button>
           </div>
         </header>
 
-        {activeTab === 'Projects' && <Projects />}
+        {/* --- DYNAMIC TAB CONTENT --- */}
+        {activeTab === 'Projects' && (
+            <Projects 
+                onAnalyze={(file) => {
+                    // 👉 FIXED: Pass the existing file to trigger analysis mode
+                    setActiveAnalysisData(file); 
+                    setActiveAnalysisModule(null); 
+                    setIsUploadModalOpen(true); 
+                }}
+                onView={(file) => handleViewAnalysis(file)} 
+            />
+        )}
+        
         {activeTab === 'Media Library' && (
           <MediaLibrary 
-            onAnalyze={(data) => {
-              setActiveAnalysisData(data);
-              setActiveTab('AnalysisReport');
+            onAnalyze={(file) => {
+              // 👉 FIXED: Same logic for library as projects
+              setActiveAnalysisData(file);
+              setActiveAnalysisModule(null);
+              setIsUploadModalOpen(true);
             }}
-            onView={(data) => {
-              setActiveAnalysisData(data);
-              setActiveTab('AnalysisReport');
-            }}
+            onView={(data) => handleViewAnalysis(data)}
           />
         )}
+        
         {activeTab === 'AI Models' && <AIModels />}
         {activeTab === 'Telemetry Data' && <TelemetryData />}
         {activeTab === 'Exported Reports' && <ExportedReports />}
         {activeTab === 'Settings' && <AccountSettings />}
-        {activeTab === 'AnalysisReport' && <AnalysisReport analysisData={activeAnalysisData} />}
+        {activeTab === 'AnalysisReport' && <AnalysisReport analysisData={activeAnalysisData} onBack={() => setActiveTab(lastTab)} />}
 
-        {/* --- UPDATED HOME TAB CONTENT --- */}
         {activeTab === 'Home' && (
           <div className="max-w-6xl mx-auto p-6 animate-fade-in">
-            {/* SHRUNK HERO BANNER */}
+            {/* HERO BANNER */}
             <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-800 dark:to-gray-800 rounded-2xl p-6 mb-6 border border-gray-200 dark:border-gray-700 flex justify-between items-center relative overflow-hidden transition-colors duration-300">
               <div className="max-w-lg relative z-10">
                 <span className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-bold px-2 py-1 rounded text-gray-600 dark:text-gray-300 mb-3 inline-block uppercase tracking-wider">GeoNet 2.0</span>
@@ -205,10 +269,11 @@ export default function Dashboard() {
                   Advanced Land Cover <br /> <span className="text-cyan-500">Mapping & Analysis</span>
                 </h1>
                 <p className="text-gray-500 dark:text-gray-400 mb-5 text-xs sm:text-sm leading-relaxed">
-                  Automatically detect forest cover, active deforestation, vegetation density, water bodies, and road networks directly from your drone footage.
+                  Automatically detect forest cover across your <span className="font-bold text-gray-900 dark:text-white">{stats.total_projects}</span> active projects. 
+                  You have processed <span className="font-bold text-gray-900 dark:text-white">{stats.total_files}</span> assets covering <span className="font-bold text-cyan-500">{stats.total_area_scanned}</span> to date.
                 </p>
                 <button
-                  onClick={() => { setActiveAnalysisModule(null); setIsUploadModalOpen(true); }}
+                  onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule(null); setIsUploadModalOpen(true); }}
                   className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-5 rounded-full text-sm transition-colors flex items-center gap-2"
                 >
                   Start New Analysis <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
@@ -226,65 +291,53 @@ export default function Dashboard() {
                 icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 iconColor="text-emerald-600 dark:text-emerald-400" iconBg="bg-emerald-50 dark:bg-emerald-500/10"
                 title="Forestry & Environment" desc="Map healthy forest cover and track active deforestation zones."
-                onClick={() => { setActiveAnalysisModule('forestry'); setIsUploadModalOpen(true); }}
+                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('forestry'); setIsUploadModalOpen(true); }}
               />
               <ActionCard
                 icon="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
                 iconColor="text-amber-500 dark:text-amber-400" iconBg="bg-amber-50 dark:bg-amber-500/10"
                 title="Land & Vegetation" desc="Calculate vegetation density and identify exposed bare soil."
-                onClick={() => { setActiveAnalysisModule('land'); setIsUploadModalOpen(true); }}
+                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('land'); setIsUploadModalOpen(true); }}
               />
               <ActionCard
                 icon="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
                 iconColor="text-blue-500 dark:text-blue-400" iconBg="bg-blue-50 dark:bg-blue-500/10"
                 title="Infrastructure & Hydrology" desc="Detect road networks and map natural water bodies."
-                onClick={() => { setActiveAnalysisModule('infrastructure'); setIsUploadModalOpen(true); }}
+                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('infrastructure'); setIsUploadModalOpen(true); }}
               />
             </div>
           </div>
         )}
       </main>
 
-      {/* 3. RE-ARCHITECTED UPLOAD MODAL */}
+      {/* 3. UPLOAD MODAL */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm animate-fade-in p-4 sm:p-6 transition-colors">
           <div className="absolute inset-0" onClick={() => setIsUploadModalOpen(false)}></div>
-
-          {/* We lock the height to 90vh and use flex-col so the header stays sticky! */}
           <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl w-full max-w-3xl relative z-10 flex flex-col max-h-[90vh] overflow-hidden border border-gray-100 dark:border-gray-700 transition-colors">
-
-            {/* Sticky Header with Close Button */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 z-20">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Configure Analysis</h3>
-              <button
-                onClick={() => setIsUploadModalOpen(false)}
-                className="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-500 dark:text-gray-400 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                {activeAnalysisData?.id ? 'Analyze Existing Asset' : 'Configure Analysis'}
+              </h3>
+              <button onClick={() => setIsUploadModalOpen(false)} className="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-500 dark:text-gray-400 transition-colors">
+                ✕
               </button>
             </div>
-
-            {/* Scrollable Body Content */}
             <div className="p-6 overflow-y-auto">
               <UploadZone
+                // 👉 FIXED: Pass existingFile to UploadZone
+                existingFile={activeAnalysisData?.id ? activeAnalysisData : null}
                 preselectedModule={activeAnalysisModule}
                 onUploadSuccess={(data) => {
-                  // 1. Save the file data
                   setActiveAnalysisData(data);
-                  // 2. Close the modal
                   setIsUploadModalOpen(false);
-                  // 3. Swap the dashboard view to the report!
                   setActiveTab('AnalysisReport');
                 }}
               />
             </div>
-
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -311,7 +364,7 @@ function NavItem({ icon, label, badge, active, onClick }) {
 
 function ActionCard({ icon, iconColor, iconBg, title, desc, onClick }) {
   return (
-    <div onClick={onClick} className="border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-2xl p-4 flex gap-4 cursor-pointer hover:shadow-md hover:border-cyan-100 dark:hover:border-cyan-900/50 transition-all group">
+    <div onClick={onClick} className="border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-2xl p-4 flex gap-4 cursor-pointer hover:shadow-md hover:border-cyan-100 dark:hover:border-cyan-900/50 transition-all group h-full">
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${iconBg} ${iconColor}`}>
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon} />

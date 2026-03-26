@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
 import { API_URL } from '../config.js';
 
-// Notice we are passing in BOTH preselectedModule and onUploadSuccess here!
-export default function UploadZone({ preselectedModule, onUploadSuccess, projectId }) {
+// 👉 Added existingFile to the props
+export default function UploadZone({ preselectedModule, onUploadSuccess, projectId, existingFile }) {
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState(null);
+  // 👉 Initialize file state with existingFile if it exists
+  const [file, setFile] = useState(existingFile || null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null); 
   const fileInputRef = useRef(null);
@@ -37,49 +38,71 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    // 👉 Check if we are analyzing an already uploaded file
+    const isExisting = !!existingFile;
+    if (!file && !isExisting) return;
+
     setIsUploading(true);
     setUploadStatus(null);
 
-    const token = localStorage.getItem('sky_token');
     const modulesToRun = preselectedModule 
       ? [preselectedModule] 
       : Object.keys(selectedModules).filter(k => selectedModules[k]);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("modules", JSON.stringify(modulesToRun));
-    if (projectId) {
-      formData.append("project_id", projectId);
+    const token = localStorage.getItem('sky_token');
+    
+    // 👉 BRANCH LOGIC: Different endpoints and bodies based on file status
+    let url = `${API_URL}upload`;
+    let method = "POST";
+    let body;
+    let headers = { "Authorization": `Bearer ${token}` };
+
+    if (isExisting) {
+      // ANALYZE EXISTING: Use the dedicated analyze endpoint
+      url = `${API_URL}media/${existingFile.id}/analyze`;
+      method = "PUT";
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      body = new URLSearchParams();
+      body.append("modules", JSON.stringify(modulesToRun));
+    } else {
+      // UPLOAD NEW: Use traditional FormData
+      body = new FormData();
+      body.append("file", file);
+      body.append("modules", JSON.stringify(modulesToRun));
+      if (projectId) body.append("project_id", projectId);
     }
 
     try {
-      const response = await fetch(`${API_URL}upload`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
-        body: formData,
+      const response = await fetch(url, {
+        method: method,
+        headers: headers,
+        body: body,
       });
 
-      if (!response.ok) throw new Error("Upload failed");
-      
-      // TRIGGER THE DASHBOARD TRANSITION
-      if (onUploadSuccess) {
+      if (response.ok) {
+        const result = await response.json();
+        
         onUploadSuccess({
-          file: file,
-          modules: modulesToRun
+          id: isExisting ? existingFile.id : result.file.id,
+          filename: isExisting ? existingFile.filename : result.file.filename,
+          modules: modulesToRun,
+          isCompleted: true,
+          // Handle slight naming difference in backend response for existing vs new
+          aiResults: isExisting ? result.results : result.aiResults 
         });
+      } else {
+        setUploadStatus('error');
       }
-
     } catch (error) {
-      console.error(error);
+      console.error("Analysis failed", error);
       setUploadStatus('error');
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Button logic: Must have a file AND at least one module selected
-  const canUpload = file && (preselectedModule || Object.values(selectedModules).some(v => v));
+  // 👉 Updated canUpload check
+  const canUpload = (file || existingFile) && (preselectedModule || Object.values(selectedModules).some(v => v));
 
   return (
     <div className="w-full flex flex-col items-center">
@@ -123,41 +146,61 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
         )}
       </div>
 
-      {/* --- DRAG AND DROP ZONE --- */}
-      <div 
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`w-full max-w-xl border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all ${
-          isDragging 
-            ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/10 scale-[1.02]' 
-            : file 
-              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10'
-              : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
-        }`}
-      >
-        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
-        {file ? (
-          <div className="text-center animate-fade-in">
-            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-            </div>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">{file.name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+      {/* --- DRAG AND DROP ZONE / EXISTING FILE INFO --- */}
+      {existingFile ? (
+        // 👉 NEW UI: Show this when an existing file is being analyzed
+        <div className="w-full max-w-xl p-6 bg-cyan-50 dark:bg-cyan-900/10 border-2 border-cyan-500 rounded-2xl flex items-center gap-4 animate-fade-in">
+          <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-xl flex items-center justify-center text-2xl shadow-sm border border-cyan-100 dark:border-cyan-800">
+            {existingFile.filename.endsWith('.mp4') ? '📽️' : '🖼️'}
           </div>
-        ) : (
-          <div className="text-center">
-            <div className="w-12 h-12 bg-white dark:bg-gray-700 shadow-sm rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 dark:border-gray-600">
-              <svg className="w-6 h-6 text-gray-400 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-            </div>
-            <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Click to upload or drag and drop</p>
-            <p className="text-[10px] text-gray-500 dark:text-gray-400">.mp4, .mov, .tif, .geojson (Max 5GB)</p>
+          <div className="flex-1">
+            <p className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest mb-1">Asset Ready</p>
+            <p className="text-sm font-bold text-gray-900 dark:text-white truncate">
+              {existingFile.filename.split('_').pop()}
+            </p>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        // TRADITIONAL UPLOAD ZONE
+        <div 
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`w-full max-w-xl border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all ${
+            isDragging 
+              ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/10 scale-[1.02]' 
+              : file 
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10'
+                : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+          {file ? (
+            <div className="text-center animate-fade-in">
+              <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+              </div>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">{file.name}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+            </div>
+          ) : (
+            <div className="text-center">
+              <div className="w-12 h-12 bg-white dark:bg-gray-700 shadow-sm rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 dark:border-gray-600">
+                <svg className="w-6 h-6 text-gray-400 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+              </div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Click to upload or drag and drop</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">.mp4, .mov, .tif, .geojson (Max 5GB)</p>
+            </div>
+          )}
+        </div>
+      )}
 
-      {uploadStatus === 'error' && <p className="text-red-500 text-xs font-medium mt-3">Upload failed. Please check your backend connection.</p>}
+      {uploadStatus === 'error' && (
+        <p className="text-red-500 text-xs font-medium mt-3 animate-pulse">
+          Analysis failed. Please check your backend connection.
+        </p>
+      )}
 
       <button 
         onClick={handleUpload}
@@ -168,7 +211,12 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
             : 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
         }`}
       >
-        {isUploading ? 'Processing Upload...' : 'Begin AI Extraction'}
+        {isUploading ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
+            Running Analysis...
+          </>
+        ) : 'Begin AI Extraction'}
       </button>
     </div>
   );

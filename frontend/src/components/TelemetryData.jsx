@@ -1,16 +1,75 @@
+import { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import { API_URL } from '../config.js';
+
+// Helper component to move the map when a list item is clicked
+function RecenterMap({ position }) {
+  const map = useMap();
+  useEffect(() => {
+    if (position) map.flyTo(position, 15);
+  }, [position, map]);
+  return null;
+}
+
 export default function TelemetryData() {
+  const [assets, setAssets] = useState([]);
+  const [selectedPos, setSelectedPos] = useState(null);
+
+  useEffect(() => {
+    const fetchTelemetry = async () => {
+      const token = localStorage.getItem('sky_token');
+      const response = await fetch(`${API_URL}media`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAssets(data.filter(a => a.latitude && a.longitude));
+      }
+    };
+    fetchTelemetry();
+  }, []);
+
   return (
-    <div className="max-w-6xl mx-auto p-8 animate-fade-in w-full flex flex-col items-center justify-center h-[80vh] text-center transition-colors duration-300">
-      <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center mb-6 text-indigo-500 dark:text-indigo-400 transition-colors">
-        <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
+    <div className="max-w-7xl mx-auto p-6 h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-6">
+      
+      {/* 📋 SIDEBAR: The "Selector" List */}
+      <div className="w-full lg:w-80 bg-white dark:bg-gray-800 rounded-3xl p-4 border border-gray-100 dark:border-gray-700 overflow-y-auto">
+        <h3 className="font-bold mb-4 dark:text-white">Geotagged Assets</h3>
+        <div className="space-y-2">
+          {assets.map(asset => (
+            <div 
+              key={asset.id}
+              onClick={() => setSelectedPos([asset.latitude, asset.longitude])}
+              className="p-3 rounded-xl border border-gray-50 dark:border-gray-700 hover:border-cyan-500 cursor-pointer transition-all"
+            >
+              <p className="text-xs font-bold truncate dark:text-gray-200">{asset.filename.split('_').pop()}</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-tighter">Alt: {asset.altitude?.toFixed(1)}m</p>
+            </div>
+          ))}
+          {assets.length === 0 && <p className="text-xs text-gray-400">No GPS data found in library.</p>}
+        </div>
       </div>
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight mb-2 transition-colors">No Telemetry Data Found</h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6 transition-colors">
-        Once you upload drone footage containing GPS metadata or flight logs, interactive maps and flight paths will appear here.
-      </p>
-      <button className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2.5 px-6 rounded-full text-sm transition-colors">
-        Upload Flight Log
-      </button>
+
+      {/* 🗺️ THE MAP */}
+      <div className="flex-1 rounded-3xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm z-0">
+        <MapContainer center={[9.03, 38.74]} zoom={6} style={{ height: '100%', width: '100%' }}>
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          
+          <RecenterMap position={selectedPos} />
+
+          {assets.map((asset) => (
+            <Marker key={asset.id} position={[asset.latitude, asset.longitude]}>
+              <Popup>
+                <div className="text-xs font-sans">
+                  <p className="font-bold">{asset.filename.split('_').pop()}</p>
+                  <p>Altitude: {asset.altitude}m</p>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      </div>
     </div>
   );
 }

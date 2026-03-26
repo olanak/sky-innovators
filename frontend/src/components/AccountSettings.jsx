@@ -1,66 +1,174 @@
+import { useState, useEffect } from 'react';
+import { API_URL } from '../config.js';
+
 export default function AccountSettings() {
+  const [profile, setProfile] = useState({ full_name: '', email: '' });
+  const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' }); // New state for passwords
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+
+  // 1. Fetch real user data on load
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const token = localStorage.getItem('sky_token');
+      try {
+        const response = await fetch(`${API_URL}users/me`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setProfile(data);
+        }
+      } catch (error) {
+        console.error("Failed to load profile", error);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  // Password Policy Check
+  const validatePassword = (pw) => {
+    return /^(?=.*[A-Z])(?=.*[!@#$%^&*])(?=.{8,})/.test(pw);
+  };
+
+  // 2. Handle Profile Update
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    setMessage({ type: '', text: '' });
+
+    // Validation for password change
+    if (passwords.new) {
+      if (!validatePassword(passwords.new)) {
+        setMessage({ type: 'error', text: 'Password must be 8+ characters, with 1 uppercase and 1 special character.' });
+        return;
+      }
+      if (passwords.new !== passwords.confirm) {
+        setMessage({ type: 'error', text: 'New passwords do not match.' });
+        return;
+      }
+    }
+
+    setIsSaving(true);
+    const token = localStorage.getItem('sky_token');
+
+    try {
+      const response = await fetch(`${API_URL}users/me`, {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          full_name: profile.full_name,
+          current_password: passwords.current || null,
+          new_password: passwords.new || null
+        })
+      });
+
+      if (response.ok) {
+        const updatedUser = await response.json();
+        localStorage.setItem('sky_user', JSON.stringify({
+          name: updatedUser.full_name,
+          email: updatedUser.email
+        }));
+        setMessage({ type: 'success', text: 'Profile updated successfully!' });
+        setPasswords({ current: '', new: '', confirm: '' }); // Reset password fields
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.detail || 'Failed to update profile.' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to update profile.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div className="max-w-4xl mx-auto p-8 animate-fade-in w-full transition-colors duration-300">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight transition-colors">Account Settings</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 transition-colors">Manage your profile, security, and platform preferences.</p>
+    <div className="max-w-4xl mx-auto p-6 lg:p-8 animate-fade-in">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Account Settings</h1>
+      
+      {/* AVATAR DISPLAY */}
+      <div className="mb-6 flex items-center gap-4">
+        <div className="w-16 h-16 rounded-full bg-cyan-600 flex items-center justify-center text-white text-2xl font-bold">
+          {profile.full_name ? profile.full_name.charAt(0).toUpperCase() : 'U'}
+        </div>
+        <div>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">Profile Avatar</p>
+          <p className="text-xs text-gray-500">Based on your account name</p>
+        </div>
       </div>
 
-      <div className="space-y-6">
-        
-        {/* Profile Section */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-colors">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 transition-colors">Profile Information</h3>
-          <div className="flex items-center gap-6 mb-6">
-            <div className="w-20 h-20 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-2xl font-bold text-gray-400 dark:text-gray-300 border border-gray-200 dark:border-gray-600 transition-colors">
-              O
-            </div>
-            <div>
-              <button className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:border-cyan-300 dark:hover:border-cyan-500 text-gray-700 dark:text-gray-200 text-sm font-semibold rounded-lg shadow-sm transition-all duration-200">
-                Change Avatar
-              </button>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 transition-colors">JPG, GIF or PNG. Max size of 2MB.</p>
-            </div>
+      <form onSubmit={handleUpdate} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+            <input 
+              type="text" 
+              value={profile.full_name} 
+              onChange={(e) => setProfile({...profile, full_name: e.target.value})}
+              className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-sm" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address (Read-only)</label>
+            <input 
+              type="email" 
+              value={profile.email} 
+              disabled
+              className="w-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-sm text-gray-500 cursor-not-allowed" 
+            />
           </div>
 
+          <hr className="border-gray-100 dark:border-gray-700 my-4" />
+          
+          <p className="text-sm font-bold text-gray-900 dark:text-white">Change Password</p>
+          
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Current Password</label>
+            <input 
+              type="password" 
+              value={passwords.current}
+              onChange={(e) => setPasswords({...passwords, current: e.target.value})}
+              className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-sm" 
+            />
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors">Full Name</label>
-              <input type="text" defaultValue="Olana Kenea" className="w-full px-4 py-2 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" />
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">New Password</label>
+              <input 
+                type="password" 
+                value={passwords.new}
+                onChange={(e) => setPasswords({...passwords, new: e.target.value})}
+                className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-sm" 
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors">Email Address</label>
-              <input type="email" defaultValue="olana@sky.com" className="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed transition-all" disabled />
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Confirm New Password</label>
+              <input 
+                type="password" 
+                value={passwords.confirm}
+                onChange={(e) => setPasswords({...passwords, confirm: e.target.value})}
+                className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-sm" 
+              />
             </div>
           </div>
         </div>
 
-        {/* Security Section */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-colors">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 transition-colors">Security</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors">Current Password</label>
-              <input type="password" placeholder="••••••••" className="w-full px-4 py-2 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all dark:placeholder-gray-400" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors">New Password</label>
-              <input type="password" placeholder="Enter new password" className="w-full px-4 py-2 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all dark:placeholder-gray-400" />
-            </div>
-          </div>
-          <button className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
-            Update Password
-          </button>
-        </div>
+        {message.text && (
+          <p className={`mt-4 text-sm ${message.type === 'success' ? 'text-emerald-500' : 'text-red-500'}`}>
+            {message.text}
+          </p>
+        )}
 
-        {/* Save Changes Footer */}
-        <div className="flex justify-end pt-4">
-          <button className="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold rounded-xl shadow-md shadow-cyan-500/20 dark:shadow-cyan-900/40 transition-all">
-            Save All Changes
-          </button>
-        </div>
-
-      </div>
+        <button 
+          type="submit" 
+          disabled={isSaving}
+          className="mt-6 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-xl text-sm transition-all"
+        >
+          {isSaving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </form>
     </div>
   );
 }
