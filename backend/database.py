@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
 # 1. Load the .env file so we can read the SECRET_KEY and DATABASE_URL
-load_dotenv()
+load_dotenv() 
 
 # 2. Get the URL from the environment variable (Render/Neon)
 # If it doesn't exist, it uses your local PostgreSQL as the fallback
