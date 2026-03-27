@@ -62,25 +62,31 @@ export default function Projects({ onAnalyze, onView }) {
       console.error("Failed to create project", error);
     }
   };
-
-  // 👉 NEW: Handle Project Deletion
-  const handleDeleteProject = async () => {
+const handleDeleteProject = async () => {
     if (!deleteModalProject) return;
+    
     const token = sessionStorage.getItem('sky_token');
+    
     try {
       const response = await fetch(`${API_URL}projects/${deleteModalProject.id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
+
       if (response.ok) {
-        setProjects(projects.filter(p => p.id !== deleteModalProject.id));
+        // ✅ Use functional update to avoid stale state issues
+        setProjects(prevProjects => prevProjects.filter(p => p.id !== deleteModalProject.id));
         setDeleteModalProject(null);
+      } else {
+        // Optional: Handle server errors (e.g., 401, 403, 500)
+        console.error("Server refused to delete project");
       }
     } catch (error) {
-      console.error("Failed to delete project", error);
+      console.error("Failed to delete project:", error);
     }
   };
 
+  
   const handleAddMedia = async (file) => {
     const token = sessionStorage.getItem('sky_token');
     try {
