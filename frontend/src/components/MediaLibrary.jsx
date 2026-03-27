@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { API_URL } from '../config.js'; // Adjust path if needed
+import { API_URL } from '../config.js'; 
 
 export default function MediaLibrary({ onAnalyze, onView }) {
   const [mediaFiles, setMediaFiles] = useState([]);
@@ -19,7 +19,6 @@ export default function MediaLibrary({ onAnalyze, onView }) {
   const fetchMedia = async () => {
     try {
       const token = localStorage.getItem('sky_token');
-      // Using API_URL which includes the trailing slash
       const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -86,43 +85,24 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     }
   };
 
-  // 👉 FIXED: Now correctly sends modules as Form data so backend can save AI results
-  const handleStartAnalysis = async () => {
-    const modulesToRun = Object.keys(selectedModules).filter(k => selectedModules[k]);
-    const token = localStorage.getItem('sky_token');
+  // 👉 FIXED: This now triggers the Dashboard's UploadZone modal 
+  // instead of performing the analysis here.
+  const handleStartAnalysis = () => {
+    if (!activeModalFile) return;
+    
+    // Close this internal simple modal
+    setActiveModalFile(null);
 
-    // Create FormData because backend uses Form(...)
-    const formData = new FormData();
-    formData.append("modules", JSON.stringify(modulesToRun));
-
-    try {
-      const response = await fetch(`${API_URL}media/${activeModalFile.id}/analyze`, {
-        method: "PUT",
-        headers: { "Authorization": `Bearer ${token}` },
-        body: formData, // Sending the module list here
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        setActiveModalFile(null); // Close modal
-
-        onAnalyze({
-          filename: activeModalFile.filename,
-          modules: modulesToRun,
-          isCompleted: false,
-          aiResults: result.results // Pass real data to the report
-        });
-      }
-    } catch (error) {
-      console.error("Failed to start analysis", error);
-    }
+    // Pass the file to the parent (Dashboard)
+    // This will open the UploadZone in "Analyze Existing Asset" mode
+    onAnalyze(activeModalFile);
   };
 
   const getFileIcon = (filename) => {
     if (filename.endsWith('.mp4') || filename.endsWith('.mov')) {
       return <svg className="w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>;
     }
-    return <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
+    return <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>;
   };
 
   return (
@@ -176,7 +156,6 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                     Analyze
                   </button>
                 ) : (
-                  // Inside the map function in MediaLibrary.jsx, update the View Report button:
                   <button
                     onClick={async () => {
                       const token = localStorage.getItem('sky_token');
@@ -191,7 +170,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                           filename: file.filename,
                           modules: Object.keys(realResults),
                           isCompleted: true,
-                          aiResults: realResults // 👈 PASS REAL DATA HERE
+                          aiResults: realResults
                         });
                       } catch (error) {
                         console.error("Failed to load results", error);
@@ -232,24 +211,17 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                 <button onClick={() => setActiveModalFile(null)} className="text-gray-400 hover:text-gray-600 transition-colors"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
               </div>
 
-              <div className="space-y-2 mb-8">
-                {Object.entries({ forestry: "🌳 Forestry", land: "🌾 Land Health", infrastructure: "🛣️ Infrastructure" }).map(([key, name]) => (
-                  <label key={key} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedModules[key] ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
-                    <span className={`text-sm font-medium ${selectedModules[key] ? 'text-cyan-700 dark:text-cyan-300' : 'text-gray-600 dark:text-gray-400'}`}>{name}</span>
-                    <input type="checkbox" className="hidden" checked={selectedModules[key]} onChange={() => setSelectedModules(prev => ({ ...prev, [key]: !prev[key] }))} />
-                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedModules[key] ? 'bg-cyan-500' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                      <div className={`w-4 h-4 rounded-full bg-white transition-transform ${selectedModules[key] ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                    </div>
-                  </label>
-                ))}
+              <div className="bg-cyan-50 dark:bg-cyan-900/10 border border-cyan-100 dark:border-cyan-800 rounded-2xl p-4 mb-8">
+                <p className="text-sm text-cyan-700 dark:text-cyan-300 leading-relaxed text-center font-medium">
+                  Would you like to configure AI extraction for this asset?
+                </p>
               </div>
 
               <button
                 onClick={handleStartAnalysis}
-                disabled={!Object.values(selectedModules).some(v => v)}
-                className="w-full bg-cyan-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all hover:bg-cyan-700 hover:scale-[1.02]"
+                className="w-full bg-cyan-600 text-white font-bold py-3 rounded-xl transition-all hover:bg-cyan-700 hover:scale-[1.02] shadow-lg shadow-cyan-500/20"
               >
-                Begin AI Extraction
+                Configure Analysis
               </button>
             </div>
           </div>
@@ -259,7 +231,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
       {/* --- CUSTOM DELETE CONFIRMATION MODAL --- */}
       {deleteModalFile && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
             <div className="p-6 text-center">
               <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -290,7 +262,6 @@ export default function MediaLibrary({ onAnalyze, onView }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }

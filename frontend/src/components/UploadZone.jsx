@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react';
 import { API_URL } from '../config.js';
 
-// 👉 Added existingFile to the props
 export default function UploadZone({ preselectedModule, onUploadSuccess, projectId, existingFile }) {
   const [isDragging, setIsDragging] = useState(false);
   // 👉 Initialize file state with existingFile if it exists
@@ -61,8 +60,8 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       // ANALYZE EXISTING: Use the dedicated analyze endpoint
       url = `${API_URL}media/${existingFile.id}/analyze`;
       method = "PUT";
-      headers["Content-Type"] = "application/x-www-form-urlencoded";
-      body = new URLSearchParams();
+      // Using FormData to stay consistent with how FastAPI usually expects Form(...)
+      body = new FormData();
       body.append("modules", JSON.stringify(modulesToRun));
     } else {
       // UPLOAD NEW: Use traditional FormData
@@ -151,7 +150,7 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
         // 👉 NEW UI: Show this when an existing file is being analyzed
         <div className="w-full max-w-xl p-6 bg-cyan-50 dark:bg-cyan-900/10 border-2 border-cyan-500 rounded-2xl flex items-center gap-4 animate-fade-in">
           <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-xl flex items-center justify-center text-2xl shadow-sm border border-cyan-100 dark:border-cyan-800">
-            {existingFile.filename.endsWith('.mp4') ? '📽️' : '🖼️'}
+            {existingFile.filename.endsWith('.mp4') || existingFile.filename.endsWith('.mov') ? '📽️' : '🖼️'}
           </div>
           <div className="flex-1">
             <p className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest mb-1">Asset Ready</p>
