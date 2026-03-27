@@ -26,6 +26,8 @@ import models
 import schemas
 import exifread
 import database
+from google.oauth2 import id_token
+from google.auth.transport import requests
 
 # Use your existing pwd_context if you already have one defined
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -650,3 +652,30 @@ def delete_project(project_id: int, db: Session = Depends(get_db), current_user:
     db.delete(project)
     db.commit()
     return {"message": "Project deleted successfully"}
+
+
+@app.post("/auth/google")
+def google_auth(data: dict, db: Session = Depends(get_db)):
+    token = data.get("token")
+    try:
+        # Specify the CLIENT_ID of the app that accesses the backend:
+        idinfo = id_token.verify_oauth2_token(token, requests.Request(), os.getenv("VITE_GOOGLE_CLIENT_ID"))
+
+        # ID token is valid. Get the user's Google info:
+        email = idinfo['email']
+        full_name = idinfo.get('name')
+
+        # Check if user exists in your DB, if not, create them (Signup)
+        user = db.query(models.User).filter(models.User.email == email).first()
+        if not user:
+            user = models.User(email=email, full_name=full_name, hashed_password="GOOGLE_AUTH_USER")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        # Create your standard JWT token
+        access_token = create_access_token(data={"sub": user.email})
+        return {"access_token": access_token, "user_info": {"name": user.full_name, "email": user.email}}
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Google Token")

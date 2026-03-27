@@ -1,16 +1,20 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-
+import { GoogleOAuthProvider } from '@react-oauth/google';
 // Components
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import ResetPassword from './components/ResetPassword';
 
+
+
+
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public Route */}
+    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}>
+      <BrowserRouter>
+        <Routes>
+          {/* Public Route */}
         <Route path="/" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />
 
@@ -32,7 +36,10 @@ function App() {
         
       </Routes>
     </BrowserRouter>
+    </GoogleOAuthProvider>
+    
   );
 }
+
 
 export default App;
