@@ -18,7 +18,7 @@ export default function AnalysisReport({ analysisData, onBack }) {
     }
 
     setIsExporting(true);
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     
     try {
       const response = await fetch(`${API_URL}media/${mediaId}/export/csv`, {

@@ -14,7 +14,7 @@ export default function Projects({ onAnalyze, onView }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('sky_token');
+        const token = sessionStorage.getItem('sky_token');
         const headers = { "Authorization": `Bearer ${token}` };
 
         const [projRes, mediaRes] = await Promise.all([
@@ -39,7 +39,7 @@ export default function Projects({ onAnalyze, onView }) {
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     try {
       const response = await fetch(`${API_URL}projects`, {
         method: "POST",
@@ -61,7 +61,7 @@ export default function Projects({ onAnalyze, onView }) {
   };
 
   const handleAddMedia = async (file) => {
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     try {
       const response = await fetch(`${API_URL}projects/${activeProject.id}/media/${file.id}`, {
         method: "PUT",
@@ -77,7 +77,7 @@ export default function Projects({ onAnalyze, onView }) {
 
   // 👉 NEW: Logic to download all analysis data for this project
   const handleExportMasterCSV = async () => {
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     try {
       const response = await fetch(`${API_URL}projects/${activeProject.id}/export/csv`, {
         headers: { "Authorization": `Bearer ${token}` }

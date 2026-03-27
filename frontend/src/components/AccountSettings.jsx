@@ -10,7 +10,7 @@ export default function AccountSettings() {
   // 1. Fetch real user data on load
   useEffect(() => {
     const fetchProfile = async () => {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       try {
         const response = await fetch(`${API_URL}users/me`, {
           headers: { "Authorization": `Bearer ${token}` }
@@ -49,7 +49,7 @@ export default function AccountSettings() {
     }
 
     setIsSaving(true);
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
 
     try {
       const response = await fetch(`${API_URL}users/me`, {
@@ -67,7 +67,7 @@ export default function AccountSettings() {
 
       if (response.ok) {
         const updatedUser = await response.json();
-        localStorage.setItem('sky_user', JSON.stringify({
+        sessionStorage.setItem('sky_user', JSON.stringify({
           name: updatedUser.full_name,
           email: updatedUser.email
         }));

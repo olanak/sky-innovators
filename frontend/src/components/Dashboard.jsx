@@ -28,7 +28,7 @@ export default function Dashboard() {
   });
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('sky_theme') === 'dark';
+    return sessionStorage.getItem('sky_theme') === 'dark';
   });
 
   const [user, setUser] = useState({ name: 'User', email: 'Loading...' });
@@ -37,7 +37,7 @@ export default function Dashboard() {
   // Fetch Dashboard Stats
   useEffect(() => {
     const fetchDashboardData = async () => {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       if (!token) return;
 
       try {
@@ -60,13 +60,13 @@ export default function Dashboard() {
 
   // Auth and Theme Logic
   useEffect(() => {
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     if (!token) {
       navigate('/login');
       return;
     }
 
-    const storedUser = localStorage.getItem('sky_user');
+    const storedUser = sessionStorage.getItem('sky_user');
     if (storedUser) {
       setUser(JSON.parse(storedUser));
     }
@@ -75,16 +75,16 @@ export default function Dashboard() {
 
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('sky_theme', 'dark');
+      sessionStorage.setItem('sky_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('sky_theme', 'light');
+      sessionStorage.setItem('sky_theme', 'light');
     }
   }, [isDarkMode, navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem('sky_token');
-    localStorage.removeItem('sky_user');
+    sessionStorage.removeItem('sky_token');
+    sessionStorage.removeItem('sky_user');
     navigate('/');
   };
 
@@ -95,7 +95,7 @@ export default function Dashboard() {
   // Helper to handle Analysis view from Library or Projects
   const handleViewAnalysis = async (asset) => {
     setLastTab(activeTab);
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     try {
       const response = await fetch(`${API_URL}media/${asset.id}/results`, {
         headers: { "Authorization": `Bearer ${token}` }

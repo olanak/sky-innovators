@@ -48,7 +48,7 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       ? [preselectedModule] 
       : Object.keys(selectedModules).filter(k => selectedModules[k]);
 
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     
     // 👉 BRANCH LOGIC: Different endpoints and bodies based on file status
     let url = `${API_URL}upload`;

@@ -18,7 +18,7 @@ export default function TelemetryData() {
 
   useEffect(() => {
     const fetchTelemetry = async () => {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });

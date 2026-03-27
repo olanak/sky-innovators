@@ -18,7 +18,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
 
   const fetchMedia = async () => {
     try {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       const response = await fetch(`${API_URL}media`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -40,7 +40,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     if (!deleteModalFile) return;
 
     try {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       await fetch(`${API_URL}media/${deleteModalFile.id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
@@ -58,7 +58,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
     if (!file) return;
 
     setIsUploading(true);
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
 
     const formData = new FormData();
     formData.append("file", file);
@@ -158,7 +158,7 @@ export default function MediaLibrary({ onAnalyze, onView }) {
                 ) : (
                   <button
                     onClick={async () => {
-                      const token = localStorage.getItem('sky_token');
+                      const token = sessionStorage.getItem('sky_token');
                       try {
                         const response = await fetch(`${API_URL}media/${file.id}/results`, {
                           headers: { "Authorization": `Bearer ${token}` }

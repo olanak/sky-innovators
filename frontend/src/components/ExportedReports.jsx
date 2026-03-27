@@ -8,7 +8,7 @@ export default function ExportedReports() {
   // 1. Fetch only processed media from the database
   useEffect(() => {
     const fetchReports = async () => {
-      const token = localStorage.getItem('sky_token');
+      const token = sessionStorage.getItem('sky_token');
       try {
         const response = await fetch(`${API_URL}media`, {
           headers: { "Authorization": `Bearer ${token}` }
@@ -29,7 +29,7 @@ export default function ExportedReports() {
 
   // 2. Professional Blob Download (Fixes "Not Authenticated" error)
   const handleDownloadCSV = async (id, originalFilename) => {
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     try {
       const response = await fetch(`${API_URL}media/${id}/export/csv`, {
         headers: { "Authorization": `Bearer ${token}` }

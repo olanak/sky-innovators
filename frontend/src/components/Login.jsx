@@ -19,23 +19,23 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem('sky_token');
+    const token = sessionStorage.getItem('sky_token');
     if (token) {
       navigate('/dashboard', { replace: true });
     }
   }, [navigate]);
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('sky_theme') === 'dark';
+    return sessionStorage.getItem('sky_theme') === 'dark';
   });
 
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('sky_theme', 'dark');
+      sessionStorage.setItem('sky_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('sky_theme', 'light');
+      sessionStorage.setItem('sky_theme', 'light');
     }
   }, [isDarkMode]);
 
@@ -147,8 +147,8 @@ export default function Login() {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Invalid email or password");
-        localStorage.setItem("sky_token", data.access_token);
-        localStorage.setItem("sky_user", JSON.stringify(data.user_info));
+        sessionStorage.setItem("sky_token", data.access_token);
+        sessionStorage.setItem("sky_user", JSON.stringify(data.user_info));
         navigate('/dashboard');
       } catch (error) {
         setErrorMessage(error.message);
