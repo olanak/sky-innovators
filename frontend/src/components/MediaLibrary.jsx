@@ -229,39 +229,41 @@ export default function MediaLibrary({ onAnalyze, onView }) {
       )}
 
       {/* --- CUSTOM DELETE CONFIRMATION MODAL --- */}
-      {deleteModalFile && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
-            <div className="p-6 text-center">
-              <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
-                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Delete Media</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 px-2">
-                Are you sure you want to permanently delete <span className="font-bold text-gray-700 dark:text-gray-300">"{deleteModalFile.filename.split('_').pop()}"</span>? This action cannot be undone.
-              </p>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteModalFile(null)}
-                  className="flex-1 py-3 rounded-xl font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-500/20 transition-all hover:scale-[1.02]"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
+{deleteModalFile && (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+    {/* Changed width to max-w-sm for a more proportional, compact look */}
+    <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-sm overflow-hidden border border-gray-100 dark:border-gray-700 shadow-2xl transform transition-all">
+      <div className="p-6 text-center">
+        {/* Slightly reduced icon size for better proportion */}
+        <div className="w-14 h-14 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+          <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
         </div>
-      )}
+
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Delete Media</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 px-4">
+          Are you sure you want to permanently delete <span className="font-bold text-gray-700 dark:text-gray-300">"{deleteModalFile.filename.split('_').pop()}"</span>? This action cannot be undone.
+        </p>
+
+        <div className="flex gap-3 px-2">
+          <button
+            onClick={() => setDeleteModalFile(null)}
+            className="flex-1 py-2.5 rounded-xl font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirmDelete}
+            className="flex-1 py-2.5 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-500/20 transition-all hover:scale-[1.02]"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)} 
     </div>
   );
-}
+} 

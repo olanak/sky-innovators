@@ -634,3 +634,19 @@ def clear_expired_tokens(db: Session = Depends(get_db)):
     
     db.commit()
     return {"message": f"Cleaned up {deleted_count} old tokens."}
+
+
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Find the project AND ensure it belongs to the logged-in user
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id, 
+        models.Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    db.delete(project)
+    db.commit()
+    return {"message": "Project deleted successfully"}
