@@ -333,71 +333,108 @@ async def analyze_stream(
             data = {"step": step, "pct": pct, "message": message, **extra}
             return f"data: {json.dumps(data)}\n\n"
 
-        try:
-            # Step 1 — file already saved
-            yield sse("uploading", 10, "File saved to storage")
-            await asyncio.sleep(0.1)
+        # ── SSE keepalive ─────────────────────────────────────────────────────
+        # Render's load balancer and the browser both close idle SSE connections
+        # after ~30s of silence. We send a comment line (: ping) every 20s so
+        # the connection stays alive during long video processing.
+        keepalive_task = None
 
-            # Step 2 — run AI metrics (calls HF Space)
-            # NOTE: No DB connection is held during the long AI inference steps.
-            # Neon's serverless SSL timeout cannot affect us here.
-            yield sse("metrics", 25, "Sending to AI model...")
-            await asyncio.sleep(0.1)
+        async def send_keepalive(queue: asyncio.Queue):
+            while True:
+                await asyncio.sleep(20)
+                await queue.put(": ping\n\n")
 
-            ai_results = run_ai_logic(media_item.filename, module_list)
-            yield sse("metrics", 50, "AI metrics complete")
-            await asyncio.sleep(0.1)
+        # We push all SSE data through an asyncio.Queue so the keepalive
+        # coroutine and the main logic can both write to the stream safely.
+        queue: asyncio.Queue = asyncio.Queue()
 
-            # Step 3 — generate segmentation masks
-            yield sse("segmentation", 60, "Generating segmentation masks...")
-            await asyncio.sleep(0.1)
-
-            seg_frames = generate_segmentation_for_media(media_item.filename, module_list)
-            yield sse("segmentation", 80, f"Masks ready ({len(seg_frames)} frames)")
-            await asyncio.sleep(0.1)
-
-            # Step 4 — open a FRESH short-lived session just for the DB write.
-            # pool_pre_ping ensures we get a live connection even if the pool
-            # recycled while we were doing AI inference.
-            yield sse("saving", 88, "Saving results to database...")
-            await asyncio.sleep(0.1)
-
-            fresh_db = database.SessionLocal()
+        async def produce():
+            """Runs the full analysis pipeline and pushes events into the queue."""
             try:
-                for module_name, result_content in ai_results.items():
-                    fresh_db.add(models.AnalysisResult(
-                        media_id=media_id,
-                        module_name=module_name,
-                        result_data=json.dumps(result_content)
-                    ))
+                await queue.put(sse("uploading", 10, "File saved to storage"))
 
-                save_segmentation_frames(media_id, seg_frames, fresh_db)
+                # ── Run inference in a thread pool ────────────────────────────
+                # run_ai_logic() and generate_segmentation_for_media() are
+                # SYNCHRONOUS blocking calls (they do HTTP requests to HF Space,
+                # CPU-bound decoding, etc.). Calling them directly inside an
+                # async generator blocks FastAPI's entire event loop — this
+                # prevents SSE frames from flushing AND causes connection timeouts.
+                # asyncio.to_thread() runs them in a thread pool executor so the
+                # event loop stays free to flush SSE frames and handle keepalives.
 
-                # Re-fetch media_item on the fresh session to update status
-                media_record = fresh_db.query(models.MediaFile).filter(
-                    models.MediaFile.id == media_id
-                ).first()
-                if media_record:
-                    media_record.status = "Processed"
+                await queue.put(sse("metrics", 25, "Sending to AI model..."))
+                ai_results = await asyncio.to_thread(
+                    run_ai_logic, media_item.filename, module_list
+                )
+                await queue.put(sse("metrics", 50, "AI metrics complete"))
 
-                fresh_db.commit()
-            except Exception as db_err:
-                fresh_db.rollback()
-                raise db_err
+                await queue.put(sse("segmentation", 60, "Generating segmentation masks..."))
+                seg_frames = await asyncio.to_thread(
+                    generate_segmentation_for_media, media_item.filename, module_list
+                )
+                await queue.put(sse("segmentation", 80, f"Masks ready ({len(seg_frames)} frames)"))
+
+                # ── Save to DB on a fresh session ─────────────────────────────
+                # Open a brand-new session only when we are ready to write.
+                # This session lives for <1 second so Neon SSL timeout
+                # can never affect it.
+                await queue.put(sse("saving", 88, "Saving results to database..."))
+
+                def _save_to_db():
+                    fresh_db = database.SessionLocal()
+                    try:
+                        for module_name, result_content in ai_results.items():
+                            fresh_db.add(models.AnalysisResult(
+                                media_id=media_id,
+                                module_name=module_name,
+                                result_data=json.dumps(result_content)
+                            ))
+                        save_segmentation_frames(media_id, seg_frames, fresh_db)
+                        media_record = fresh_db.query(models.MediaFile).filter(
+                            models.MediaFile.id == media_id
+                        ).first()
+                        if media_record:
+                            media_record.status = "Processed"
+                        fresh_db.commit()
+                    except Exception as db_err:
+                        fresh_db.rollback()
+                        raise db_err
+                    finally:
+                        fresh_db.close()
+
+                # Run the DB write in a thread too (SQLAlchemy is sync)
+                await asyncio.to_thread(_save_to_db)
+
+                await queue.put(sse(
+                    "done", 100, "Analysis complete",
+                    aiResults=ai_results,
+                    filename=media_item.filename,
+                ))
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                await queue.put(sse("error", 0, str(e)))
             finally:
-                fresh_db.close()
+                await queue.put(None)  # sentinel — tells consumer to stop
 
-            # Step 5 — done
-            yield sse(
-                "done", 100, "Analysis complete",
-                aiResults=ai_results,
-                filename=media_item.filename,
-            )
+        # Start keepalive and producer concurrently
+        producer_task  = asyncio.create_task(produce())
+        keepalive_task = asyncio.create_task(send_keepalive(queue))
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            yield sse("error", 0, str(e))
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            keepalive_task.cancel()
+            producer_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
 
     return StreamingResponse(
         event_stream(),
