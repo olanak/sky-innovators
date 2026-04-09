@@ -3,23 +3,30 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
-# 1. Load the .env file so we can read the SECRET_KEY and DATABASE_URL
-load_dotenv() 
+load_dotenv()
 
-# 2. Get the URL from the environment variable (Render/Neon)
-# If it doesn't exist, it uses your local PostgreSQL as the fallback
 SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
+    "DATABASE_URL",
     "postgresql://postgres:%40Kenne345@localhost/skyinnovators"
 )
 
-# 3. CRITICAL FIX: SQLAlchemy requires 'postgresql://', 
-# but many cloud providers (like Render/Heroku) provide 'postgres://'
 if SQLALCHEMY_DATABASE_URL and SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
     SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# 4. Create the engine
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# ── Neon-safe engine configuration ───────────────────────────────────────────
+# pool_pre_ping=True   — tests the connection before using it; if it's dead
+#                        SQLAlchemy silently reconnects instead of crashing
+# pool_recycle=300     — recycle connections after 5 minutes so Neon's 5-minute
+#                        auto-suspend never holds a stale connection
+# pool_size / max_overflow — conservative limits for Render free tier
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_size=5,
+    max_overflow=10,
+    connect_args={"connect_timeout": 10},
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

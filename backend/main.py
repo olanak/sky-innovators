@@ -323,6 +323,11 @@ async def analyze_stream(
 
     module_list = json.loads(modules)
 
+    # Close the auth-check session immediately — we don't want to hold
+    # a Neon connection open for the entire SSE lifetime (videos take 60-120s
+    # and Neon auto-suspends idle connections after ~5 minutes, killing the SSL)
+    db.close()
+
     async def event_stream():
         def sse(step, pct, message, **extra):
             data = {"step": step, "pct": pct, "message": message, **extra}
@@ -334,6 +339,8 @@ async def analyze_stream(
             await asyncio.sleep(0.1)
 
             # Step 2 — run AI metrics (calls HF Space)
+            # NOTE: No DB connection is held during the long AI inference steps.
+            # Neon's serverless SSL timeout cannot affect us here.
             yield sse("metrics", 25, "Sending to AI model...")
             await asyncio.sleep(0.1)
 
@@ -349,22 +356,36 @@ async def analyze_stream(
             yield sse("segmentation", 80, f"Masks ready ({len(seg_frames)} frames)")
             await asyncio.sleep(0.1)
 
-            # Step 4 — save everything to DB
+            # Step 4 — open a FRESH short-lived session just for the DB write.
+            # pool_pre_ping ensures we get a live connection even if the pool
+            # recycled while we were doing AI inference.
             yield sse("saving", 88, "Saving results to database...")
             await asyncio.sleep(0.1)
 
-            for module_name, result_content in ai_results.items():
-                new_result = models.AnalysisResult(
-                    media_id=media_id,
-                    module_name=module_name,
-                    result_data=json.dumps(result_content)
-                )
-                db.add(new_result)
+            fresh_db = database.SessionLocal()
+            try:
+                for module_name, result_content in ai_results.items():
+                    fresh_db.add(models.AnalysisResult(
+                        media_id=media_id,
+                        module_name=module_name,
+                        result_data=json.dumps(result_content)
+                    ))
 
-            save_segmentation_frames(media_id, seg_frames, db)
+                save_segmentation_frames(media_id, seg_frames, fresh_db)
 
-            media_item.status = "Processed"
-            db.commit()
+                # Re-fetch media_item on the fresh session to update status
+                media_record = fresh_db.query(models.MediaFile).filter(
+                    models.MediaFile.id == media_id
+                ).first()
+                if media_record:
+                    media_record.status = "Processed"
+
+                fresh_db.commit()
+            except Exception as db_err:
+                fresh_db.rollback()
+                raise db_err
+            finally:
+                fresh_db.close()
 
             # Step 5 — done
             yield sse(
@@ -376,7 +397,6 @@ async def analyze_stream(
         except Exception as e:
             import traceback
             traceback.print_exc()
-            db.rollback()
             yield sse("error", 0, str(e))
 
     return StreamingResponse(
