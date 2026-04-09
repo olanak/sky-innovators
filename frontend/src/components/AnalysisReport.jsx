@@ -1,140 +1,467 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_URL } from '../config.js';
 
-export default function AnalysisReport({ analysisData, onBack }) {
-  const [isExporting, setIsExporting] = useState(false);
+// ─── CLASS_CONFIG ─────────────────────────────────────────────────────────────
+const CLASS_CONFIG = {
+  HealthyTree:   { label: 'Healthy Trees',   color: '#228b22', rgba: 'rgba(34,139,34,0.55)'   },
+  DeadTree:      { label: 'Dead / Stressed', color: '#8b5a2b', rgba: 'rgba(139,90,43,0.55)'   },
+  LowVegetation: { label: 'Low Vegetation',  color: '#9acd32', rgba: 'rgba(154,205,50,0.55)'  },
+  BareSoil:      { label: 'Bare Soil',       color: '#cd853f', rgba: 'rgba(205,133,63,0.55)'  },
+  Water:         { label: 'Water Bodies',    color: '#1e90ff', rgba: 'rgba(30,144,255,0.55)'  },
+  Road:          { label: 'Roads',           color: '#a9a9a9', rgba: 'rgba(169,169,169,0.55)' },
+  Building:      { label: 'Buildings',       color: '#dc5050', rgba: 'rgba(220,80,80,0.55)'   },
+};
 
-  // 1. Helpers
-  const displayFilename = analysisData?.filename?.split('_').pop() || "Untitled Asset";
-  const isVideo = analysisData?.filename?.endsWith('.mp4') || analysisData?.filename?.endsWith('.mov');
+// ─── RLE decode ───────────────────────────────────────────────────────────────
+function decodeRLE(rle, width, height) {
+  const mask = new Uint8Array(width * height);
+  let pos = 0, val = 0;
+  for (const count of rle) {
+    for (let i = 0; i < count; i++) mask[pos++] = val;
+    val = val === 0 ? 1 : 0;
+  }
+  return mask;
+}
+
+// ─── Get actual rendered content rect of <img> or <video> ────────────────────
+// object-contain adds black bars — this finds the real pixel content area.
+function getMediaContentRect(mediaEl, containerEl) {
+  const containerRect = containerEl.getBoundingClientRect();
+  const elRect        = mediaEl.getBoundingClientRect();
+
+  const elW  = elRect.width;
+  const elH  = elRect.height;
+  const natW = mediaEl.videoWidth  || mediaEl.naturalWidth  || elW;
+  const natH = mediaEl.videoHeight || mediaEl.naturalHeight || elH;
+
+  if (!natW || !natH) {
+    // Fallback — fill the element box
+    return { left: elRect.left - containerRect.left, top: elRect.top - containerRect.top, width: elW, height: elH };
+  }
+
+  const scale   = Math.min(elW / natW, elH / natH);
+  const rendW   = natW * scale;
+  const rendH   = natH * scale;
+  const offsetX = (elW - rendW) / 2;
+  const offsetY = (elH - rendH) / 2;
+
+  return {
+    left:   elRect.left - containerRect.left + offsetX,
+    top:    elRect.top  - containerRect.top  + offsetY,
+    width:  rendW,
+    height: rendH,
+  };
+}
+
+// ─── Nearest frame lookup ─────────────────────────────────────────────────────
+function findNearestFrame(frames, ms) {
+  if (!frames?.length) return null;
+  let nearest = frames[0], minDiff = Math.abs(frames[0].timestamp_ms - ms);
+  for (const f of frames) {
+    const d = Math.abs(f.timestamp_ms - ms);
+    if (d < minDiff) { minDiff = d; nearest = f; }
+  }
+  return nearest;
+}
+
+// ─── OverlayCanvas ────────────────────────────────────────────────────────────
+function OverlayCanvas({ mediaRef, containerRef, isVideo, segmentationFrames, activeClasses }) {
+  const canvasRef = useRef(null);
+
+  // Position canvas exactly over the rendered media content (not black bars)
+  const positionCanvas = useCallback(() => {
+    const canvas    = canvasRef.current;
+    const container = containerRef.current;
+    const media     = mediaRef.current;
+    if (!canvas || !container || !media) return false;
+
+    const rect = getMediaContentRect(media, container);
+    const w    = Math.round(rect.width);
+    const h    = Math.round(rect.height);
+    if (!w || !h) return false;
+
+    canvas.style.position = 'absolute';
+    canvas.style.left     = `${rect.left}px`;
+    canvas.style.top      = `${rect.top}px`;
+    canvas.style.width    = `${w}px`;
+    canvas.style.height   = `${h}px`;
+
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width  = w;
+      canvas.height = h;
+    }
+    return true;
+  }, [mediaRef, containerRef]);
+
+  // Paint all active classes — each on its own offscreen canvas so layers
+  // stack correctly (drawImage respects alpha, putImageData does not)
+  const renderFrame = useCallback((frameData) => {
+    if (!positionCanvas()) return;
+    const canvas = canvasRef.current;
+    const ctx    = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!frameData?.segments) return;
+
+    for (const seg of frameData.segments) {
+      if (!activeClasses.includes(seg.class)) continue;
+      const cfg = CLASS_CONFIG[seg.class];
+      if (!cfg || !seg.mask_rle) continue;
+
+      const mW   = seg.width  ?? canvas.width;
+      const mH   = seg.height ?? canvas.height;
+      const mask = decodeRLE(seg.mask_rle, mW, mH);
+
+      const offscreen    = document.createElement('canvas');
+      offscreen.width    = mW;
+      offscreen.height   = mH;
+      const offCtx       = offscreen.getContext('2d');
+      const imageData    = offCtx.createImageData(mW, mH);
+      const m            = cfg.rgba.match(/[\d.]+/g).map(Number);
+      const [r, g, b, a] = [m[0], m[1], m[2], Math.round(m[3] * 255)];
+
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] === 1) {
+          imageData.data[i * 4]     = r;
+          imageData.data[i * 4 + 1] = g;
+          imageData.data[i * 4 + 2] = b;
+          imageData.data[i * 4 + 3] = a;
+        }
+      }
+      offCtx.putImageData(imageData, 0, 0);
+      ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+    }
+  }, [activeClasses, positionCanvas]);
+
+  // Convenience — get the current frame for the video's current time
+  const renderCurrentVideoFrame = useCallback(() => {
+    const video = mediaRef.current;
+    if (!video || !segmentationFrames) return;
+    renderFrame(findNearestFrame(segmentationFrames, video.currentTime * 1000));
+  }, [mediaRef, segmentationFrames, renderFrame]);
+
+  // ── VIDEO event listeners ─────────────────────────────────────────────────
+  useEffect(() => {
+    const video = mediaRef.current;
+    if (!isVideo || !video) return;
+
+    // timeupdate — fires ~4× per second while playing — main sync event
+    const onTimeUpdate = () =>
+      renderFrame(findNearestFrame(segmentationFrames, video.currentTime * 1000));
+
+    // FIX 1: 'seeked' fires after the loop resets currentTime to 0.
+    // Without this the canvas stays blank until the next timeupdate fires.
+    const onSeeked = () =>
+      renderFrame(findNearestFrame(segmentationFrames, video.currentTime * 1000));
+
+    // 'playing' fires when playback resumes after pause/buffer/loop-restart.
+    // Guarantees the overlay is painted even if timeupdate is slow to fire.
+    const onPlaying = () =>
+      renderFrame(findNearestFrame(segmentationFrames, video.currentTime * 1000));
+
+    // 'loadeddata' — fires when the video is ready (covers media library navigation)
+    const onLoaded = () =>
+      renderFrame(findNearestFrame(segmentationFrames, video.currentTime * 1000));
+
+    video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('seeked',     onSeeked);
+    video.addEventListener('playing',    onPlaying);
+    video.addEventListener('loadeddata', onLoaded);
+
+    // Paint immediately if video is already playing when this effect runs
+    if (!video.paused) onPlaying();
+
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('seeked',     onSeeked);
+      video.removeEventListener('playing',    onPlaying);
+      video.removeEventListener('loadeddata', onLoaded);
+    };
+  }, [isVideo, mediaRef, segmentationFrames, renderFrame]);
+
+  // ── IMAGE render ─────────────────────────────────────────────────────────
+  // FIX 2: This effect runs whenever segmentationFrames arrives (including
+  // the case where the image was already loaded before the fetch finished).
+  // We check img.complete so we never miss the window where the image loaded
+  // before data was ready.
+  useEffect(() => {
+    if (isVideo) return;
+    const img = mediaRef.current;
+    if (!img) return;
+
+    const doRender = () => {
+      // Only render if data is actually available
+      if (segmentationFrames) renderFrame(segmentationFrames[0]);
+    };
+
+    if (img.complete && img.naturalWidth) {
+      doRender();
+    } else {
+      img.addEventListener('load', doRender, { once: true });
+    }
+  // Re-runs when segmentationFrames arrives OR activeClasses changes
+  }, [isVideo, mediaRef, segmentationFrames, activeClasses, renderFrame]);
+
+  // ── ResizeObserver + scroll ───────────────────────────────────────────────
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media) return;
+
+    const rerender = () => {
+      if (isVideo) renderCurrentVideoFrame();
+      else if (segmentationFrames) renderFrame(segmentationFrames[0]);
+    };
+
+    const ro = new ResizeObserver(rerender);
+    ro.observe(media);
+    window.addEventListener('scroll', rerender, { passive: true });
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('scroll', rerender);
+    };
+  }, [mediaRef, isVideo, segmentationFrames, renderFrame, renderCurrentVideoFrame]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ pointerEvents: 'none', zIndex: 10 }}
+    />
+  );
+}
+
+// ─── Main Report Component ────────────────────────────────────────────────────
+export default function AnalysisReport({ analysisData, onBack }) {
+  const [isExporting, setIsExporting]      = useState(false);
+  const [activeClasses, setActiveClasses]  = useState(Object.keys(CLASS_CONFIG));
+  const [segmentationFrames, setSegFrames] = useState(null);
+  const [loadingMasks, setLoadingMasks]    = useState(true);
+  const [opacity, setOpacity]              = useState(70);
+
+  const mediaRef     = useRef(null);
+  const containerRef = useRef(null);
+
+  const displayFilename = analysisData?.filename?.split('_').pop() || 'Untitled Asset';
+  const isVideo = /\.(mp4|mov|webm|avi)$/i.test(analysisData?.filename ?? '');
   const mediaUrl = `${API_URL}static/${analysisData?.filename}`;
 
+  // Reset state when a different media item is opened (media library navigation)
+  useEffect(() => {
+    setSegFrames(null);
+    setLoadingMasks(true);
+    setActiveClasses(Object.keys(CLASS_CONFIG));
+  }, [analysisData?.id]);
+
+  // Fetch segmentation frames
+  useEffect(() => {
+    if (!analysisData?.id) return;
+    const token = sessionStorage.getItem('sky_token');
+
+    fetch(`${API_URL}media/${analysisData.id}/segmentation`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setSegFrames(data?.frames ?? null))
+      .catch(() => setSegFrames(null))
+      .finally(() => setLoadingMasks(false));
+  }, [analysisData?.id]);
+
+  const toggleClass = (cls) =>
+    setActiveClasses(prev =>
+      prev.includes(cls) ? prev.filter(c => c !== cls) : [...prev, cls]
+    );
+
   const handleExportCSV = async () => {
-    const mediaId = analysisData?.id; 
+    const mediaId = analysisData?.id;
     if (!mediaId) return;
     setIsExporting(true);
     const token = sessionStorage.getItem('sky_token');
     try {
-      const response = await fetch(`${API_URL}media/${mediaId}/export/csv`, {
-        headers: { "Authorization": `Bearer ${token}` }
+      const r = await fetch(`${API_URL}media/${mediaId}/export/csv`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error("Export failed");
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      if (!r.ok) throw new Error('Export failed');
+      const blob = await r.blob();
+      const url  = window.URL.createObjectURL(blob);
+      const a    = document.createElement('a');
       a.href = url;
-      a.download = `SkyInnovators_Metrics_${displayFilename.split('.')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-    } catch (error) {
-      console.error("Export Error:", error);
-    } finally {
-      setIsExporting(false);
-    }
+      a.download = `SkyInnovators_${displayFilename.split('.')[0]}.csv`;
+      document.body.appendChild(a); a.click();
+      window.URL.revokeObjectURL(url); a.remove();
+    } catch (e) { console.error(e); }
+    finally { setIsExporting(false); }
   };
 
-  if (!analysisData) return <div className="p-20 text-center text-gray-500">No analysis selected.</div>;
+  if (!analysisData) return (
+    <div className="p-20 text-center text-gray-500">No analysis selected.</div>
+  );
+
+  const detectedClasses = segmentationFrames
+    ? [...new Set(segmentationFrames.flatMap(f => f.segments?.map(s => s.class) ?? []))]
+    : Object.keys(CLASS_CONFIG);
 
   return (
     <div className="max-w-6xl mx-auto p-6 lg:p-8 animate-fade-in">
-      
-      {/* HEADER & BACK BUTTON */}
+
       <div className="flex justify-between items-center mb-6">
-        <button 
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-cyan-600 dark:text-gray-400 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        <button onClick={onBack}
+          className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-cyan-600 dark:text-gray-400 transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+          </svg>
           Back to Library
         </button>
-        
-        <button 
-          onClick={handleExportCSV}
-          disabled={isExporting}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-        >
-          {isExporting ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : "Export CSV"}
+        <button onClick={handleExportCSV} disabled={isExporting}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-50">
+          {isExporting
+            ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
+            : 'Export CSV'}
         </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* LEFT COLUMN: REAL-TIME PLAYER / VIEWER */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="relative bg-black rounded-3xl overflow-hidden shadow-2xl border border-gray-800 aspect-video group">
-            {/* REAL-TIME OVERLAY (The "Different Colors" Layer) */}
-            <div className="absolute inset-0 z-10 pointer-events-none opacity-40 mix-blend-overlay">
-               {/* This represents the AI color coding (Forest, Deforest, etc.) */}
-               <div className="absolute top-10 left-10 w-32 h-32 bg-emerald-500/50 blur-3xl animate-pulse"></div>
-               <div className="absolute bottom-20 right-20 w-48 h-48 bg-red-500/40 blur-3xl animate-pulse"></div>
-            </div>
+        <div className="lg:col-span-2 space-y-4">
+
+          <div
+            ref={containerRef}
+            className="relative bg-black rounded-3xl overflow-hidden shadow-2xl border border-gray-800 aspect-video"
+          >
+            {loadingMasks && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin"/>
+                  <span className="text-xs text-cyan-400 font-semibold tracking-widest uppercase">
+                    Loading Segmentation…
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {!loadingMasks && segmentationFrames && (
+              <div
+                className="absolute inset-0 z-10 pointer-events-none"
+                style={{ opacity: opacity / 100 }}
+              >
+                <OverlayCanvas
+                  mediaRef={mediaRef}
+                  containerRef={containerRef}
+                  isVideo={isVideo}
+                  segmentationFrames={segmentationFrames}
+                  activeClasses={activeClasses}
+                />
+              </div>
+            )}
 
             {isVideo ? (
-              <video 
-                src={mediaUrl} 
-                controls 
-                autoPlay 
-                muted 
-                loop 
+              <video ref={mediaRef} src={mediaUrl}
+                controls autoPlay muted loop crossOrigin="anonymous"
                 className="w-full h-full object-contain"
               />
             ) : (
-              <img 
-                src={mediaUrl} 
-                className="w-full h-full object-contain" 
-                alt="Analyzed Asset" 
+              <img ref={mediaRef} src={mediaUrl}
+                alt="Analyzed Asset" crossOrigin="anonymous"
+                className="w-full h-full object-contain"
               />
             )}
 
-            {/* LIVE AI LABELS */}
-            <div className="absolute top-4 left-4 z-20 flex gap-2">
-               <span className="bg-emerald-500/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg">FOREST AREA</span>
-               <span className="bg-red-500/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg">DEFORESTATION ZONE</span>
+            <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-1.5">
+              {detectedClasses.filter(cls => activeClasses.includes(cls)).map(cls => (
+                <span key={cls}
+                  className="backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg"
+                  style={{ backgroundColor: CLASS_CONFIG[cls]?.color + 'cc' }}>
+                  {CLASS_CONFIG[cls]?.label ?? cls}
+                </span>
+              ))}
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-6 rounded-3xl shadow-sm">
-             <h3 className="font-bold text-gray-900 dark:text-white mb-2">Analysis Intelligence</h3>
-             <p className="text-sm text-gray-500 leading-relaxed">
-                The AI engine has processed the <b>{isVideo ? 'video frames' : 'image pixels'}</b> to identify land-use patterns. 
-                Color overlays represent high-confidence classifications based on your selected modules.
-             </p>
+          {/* Controls */}
+          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-5 rounded-3xl shadow-sm space-y-4">
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                Layer Visibility
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {detectedClasses.map(cls => {
+                  const cfg    = CLASS_CONFIG[cls];
+                  const active = activeClasses.includes(cls);
+                  return (
+                    <button key={cls} onClick={() => toggleClass(cls)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                        active
+                          ? 'text-white border-transparent shadow-md'
+                          : 'bg-transparent text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600'
+                      }`}
+                      style={active ? { backgroundColor: cfg?.color } : {}}>
+                      <span className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: active ? 'white' : cfg?.color }}/>
+                      {cfg?.label ?? cls}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+                Overlay Opacity — {opacity}%
+              </p>
+              <input type="range" min={0} max={100} value={opacity}
+                onChange={e => setOpacity(Number(e.target.value))}
+                className="w-full accent-cyan-500 h-1.5 rounded-full"/>
+            </div>
+
+            <p className="text-xs text-gray-400 leading-relaxed">
+              SkyNet 1.0 segmentation overlay for{' '}
+              {isVideo ? 'video frames (synced to playback)' : 'image pixels'}.
+              Toggle classes or adjust opacity to inspect specific zones.
+            </p>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: METRICS PANEL */}
+        {/* RIGHT: Metrics */}
         <div className="space-y-6">
           <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-xl">
-             <h2 className="text-xl font-bold mb-1">Results Summary</h2>
-             <p className="text-xs text-gray-400 mb-6 truncate">{displayFilename}</p>
-             
-             <div className="space-y-4">
-                {Object.entries(analysisData.aiResults || {}).map(([module, data]) => (
-                  <div key={module} className="border-b border-white/10 pb-4 last:border-0">
-                    <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2">{module}</p>
-                    {Object.entries(data).map(([key, val]) => (
-                      <div key={key} className="flex justify-between items-center mb-1">
-                        <span className="text-xs text-gray-300 capitalize">{key.replace('_', ' ')}</span>
-                        <span className="text-sm font-bold">{val}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-             </div>
+            <h2 className="text-xl font-bold mb-1">Results Summary</h2>
+            <p className="text-xs text-gray-400 mb-6 truncate">{displayFilename}</p>
+            <div className="space-y-4">
+              {Object.entries(analysisData.aiResults || {}).map(([module, data]) => (
+                <div key={module} className="border-b border-white/10 pb-4 last:border-0">
+                  <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2">
+                    {module}
+                  </p>
+                  {Object.entries(data).map(([key, val]) => (
+                    <div key={key} className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-gray-300 capitalize">{key}</span>
+                      <span className="text-sm font-bold text-right ml-2">{val}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-6 rounded-3xl shadow-sm text-center">
-             <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">Confidence Score</p>
-             <p className="text-3xl font-black text-emerald-500 italic">98.2%</p>
+          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-5 rounded-3xl shadow-sm">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+              Colour Legend
+            </p>
+            <div className="space-y-2">
+              {detectedClasses.map(cls => (
+                <div key={cls} className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-sm flex-shrink-0"
+                    style={{ backgroundColor: CLASS_CONFIG[cls]?.color }}/>
+                  <span className="text-xs text-gray-600 dark:text-gray-300">
+                    {CLASS_CONFIG[cls]?.label ?? cls}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="mt-8 text-center border-t border-gray-100 dark:border-gray-800 pt-6">
         <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium">
-          Securely generated by Sky Innovators AI Engine • 2026
+          Securely generated by Sky Innovators AI Engine • SkyNet <v1 className="0">1.0</v1>• 2026
         </p>
       </div>
     </div>

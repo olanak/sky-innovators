@@ -16,7 +16,6 @@ from typing import Optional #
 import csv
 from fastapi.responses import StreamingResponse
 import io
-import asyncio
 import secrets
 from mailer import send_reset_email
 from passlib.context import CryptContext
@@ -29,11 +28,6 @@ import exifread
 import database
 from google.oauth2 import id_token
 from google.auth.transport import requests
-from sky_innovators_inference import (
-    run_ai_logic,
-    generate_segmentation_for_media,
-    save_segmentation_frames,
-)
 
 # Use your existing pwd_context if you already have one defined
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -213,180 +207,84 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
 # ==========================================
 # UPLOAD AND MEDIA ROUTES
 # ==========================================
-
 @app.post("/upload")
 async def upload_drone_footage(
-    file: UploadFile = File(...),
-    modules: str = Form(...),
-    project_id: Optional[int] = Form(None),
+    file: UploadFile = File(...), 
+    modules: str = Form(...), 
+    project_id: Optional[int] = Form(None), 
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user) 
 ):
-    """
-    Phase 1: Save the file to disk and create the DB record immediately.
-    Returns media_id so the frontend can open the SSE progress stream.
-    AI analysis is NOT run here — it runs in /upload/{media_id}/analyze-stream.
-    """
     try:
+        # 1. Process and Save the Physical File
         file_bytes = await file.read()
         file_size_mb = round(len(file_bytes) / (1024 * 1024), 2)
-
+        
         timestamp = int(time.time())
         safe_filename = f"{timestamp}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, safe_filename)
-
+        
         with open(file_path, "wb") as f:
             f.write(file_bytes)
 
+        # 2. Extract Real Telemetry (Returns None, None, None for PNGs)
         lat, lon, alt = extract_exif_data(file_path)
 
+        # 3. Parse Analysis Modules
         try:
             parsed_modules = json.loads(modules)
         except:
             parsed_modules = []
-
+        
+        initial_status = "Uploaded" if len(parsed_modules) == 0 else "Processed"
+            
+        # 4. Create Media Record (Allows lat/lon to be None)
         new_media = models.MediaFile(
-            filename=safe_filename,
-            file_path=file_path,
+            filename=safe_filename, 
+            file_path=file_path, 
             file_size_mb=file_size_mb,
-            status="Processing",
+            status=initial_status,
             owner_id=current_user.id,
             project_id=project_id,
-            latitude=lat,
-            longitude=lon,
-            altitude=alt
+            latitude=lat, # Will be None for PNG
+            longitude=lon, # Will be None for PNG
+            altitude=alt # Will be None for PNG
         )
-
+        
         db.add(new_media)
-        db.commit()
-        db.refresh(new_media)
+        db.flush()
 
-        return {
-            "status": "uploaded",
-            "file": {
-                "id":       new_media.id,
-                "filename": new_media.filename,
-                "status":   new_media.status,
-            },
-            "modules": parsed_modules,
-        }
-
-    except Exception as e:
-        db.rollback()
-        print(f"CRITICAL ERROR DURING UPLOAD: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/upload/{media_id}/analyze-stream")
-async def analyze_stream(
-    media_id: int,
-    modules: str,
-    token: str,
-    db: Session = Depends(get_db),
-):
-    """
-    Phase 2: Run AI analysis and stream progress via Server-Sent Events.
-
-    The frontend opens this as an EventSource immediately after upload.
-    Events emitted:
-        { "step": "uploading",    "pct": 10, "message": "File saved" }
-        { "step": "metrics",      "pct": 40, "message": "Running AI metrics..." }
-        { "step": "segmentation", "pct": 70, "message": "Generating overlays..." }
-        { "step": "saving",       "pct": 90, "message": "Saving to database..." }
-        { "step": "done",         "pct": 100, "message": "Analysis complete",
-          "aiResults": {...}, "filename": "..." }
-        { "step": "error",        "pct": 0,  "message": "..." }
-
-    Auth is passed as a query param (token=) because EventSource doesn't
-    support custom headers.
-    """
-    # Authenticate via query param (EventSource limitation)
-    credentials_exception = HTTPException(status_code=401, detail="Invalid token")
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except jwt.PyJWTError:
-        raise credentials_exception
-
-    current_user = db.query(models.User).filter(models.User.email == email).first()
-    if not current_user:
-        raise credentials_exception
-
-    media_item = db.query(models.MediaFile).filter(
-        models.MediaFile.id == media_id,
-        models.MediaFile.owner_id == current_user.id
-    ).first()
-    if not media_item:
-        raise HTTPException(status_code=404, detail="Media not found")
-
-    module_list = json.loads(modules)
-
-    async def event_stream():
-        def sse(step, pct, message, **extra):
-            data = {"step": step, "pct": pct, "message": message, **extra}
-            return f"data: {json.dumps(data)}\n\n"
-
-        try:
-            # Step 1 — file already saved
-            yield sse("uploading", 10, "File saved to storage")
-            await asyncio.sleep(0.1)
-
-            # Step 2 — run AI metrics (calls HF Space)
-            yield sse("metrics", 25, "Sending to AI model...")
-            await asyncio.sleep(0.1)
-
-            ai_results = run_ai_logic(media_item.filename, module_list)
-            yield sse("metrics", 50, "AI metrics complete")
-            await asyncio.sleep(0.1)
-
-            # Step 3 — generate segmentation masks
-            yield sse("segmentation", 60, "Generating segmentation masks...")
-            await asyncio.sleep(0.1)
-
-            seg_frames = generate_segmentation_for_media(media_item.filename, module_list)
-            yield sse("segmentation", 80, f"Masks ready ({len(seg_frames)} frames)")
-            await asyncio.sleep(0.1)
-
-            # Step 4 — save everything to DB
-            yield sse("saving", 88, "Saving results to database...")
-            await asyncio.sleep(0.1)
-
+        # 5. Handle Instant AI Analysis Results
+        ai_results = None
+        if len(parsed_modules) > 0:
+            ai_results = run_ai_logic(safe_filename, parsed_modules)
+            
             for module_name, result_content in ai_results.items():
                 new_result = models.AnalysisResult(
-                    media_id=media_id,
+                    media_id=new_media.id,
                     module_name=module_name,
                     result_data=json.dumps(result_content)
                 )
                 db.add(new_result)
 
-            save_segmentation_frames(media_id, seg_frames, db)
+        db.commit()
+        db.refresh(new_media)
+        
+        return {
+            "status": "success", 
+            "file": {
+                "id": new_media.id,
+                "filename": new_media.filename,
+                "status": new_media.status
+            },
+            "aiResults": ai_results
+        }
 
-            media_item.status = "Processed"
-            db.commit()
-
-            # Step 5 — done
-            yield sse(
-                "done", 100, "Analysis complete",
-                aiResults=ai_results,
-                filename=media_item.filename,
-            )
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            db.rollback()
-            yield sse("error", 0, str(e))
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":    "no-cache",
-            "X-Accel-Buffering": "no",   # prevents nginx from buffering SSE
-        },
-    )
+    except Exception as e:
+        db.rollback()
+        # 👉 LOGGING THE REAL ERROR: Check your terminal for this!
+        print(f"CRITICAL ERROR DURING UPLOAD: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 @app.get("/media")
@@ -482,81 +380,39 @@ def link_media_to_project(project_id: int, media_id: int, db: Session = Depends(
     return {"status": "success", "message": "Media linked to project"}
 
 
-# run_ai_logic is now imported from sky_innovators_inference.py
-# The mock below is kept for reference only — it is never called.
-# def run_ai_logic(filename: str, modules: list):
-#     results = {}
-#     if "forestry" in modules:
-#         results["forestry"] = {"canopy_cover": 72, "health_score": "Good"}
-#     if "land" in modules:
-#         results["land"] = {"vegetation_index": 0.82, "bare_soil": "12%"}
-#     if "infrastructure" in modules:
-#         results["infrastructure"] = {"roads_detected": "4.2km", "water_bodies": 1}
-#     return results
+def run_ai_logic(filename: str, modules: list):
+    """
+    PLUG-IN POINT: When your AI model is ready, 
+    replace this mock logic with your model.predict() calls.
+    """
+    results = {}
+    
+    if "forestry" in modules:
+        results["forestry"] = {"canopy_cover": 72, "health_score": "Good"}
+    if "land" in modules:
+        results["land"] = {"vegetation_index": 0.82, "bare_soil": "12%"}
+    if "infrastructure" in modules:
+        results["infrastructure"] = {"roads_detected": "4.2km", "water_bodies": 1}
+        
+    return results
 
 
 @app.get("/media/{media_id}/results")
 def get_analysis_results(media_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Verify the user owns the media file first
     media_item = db.query(models.MediaFile).filter(models.MediaFile.id == media_id, models.MediaFile.owner_id == current_user.id).first()
     if not media_item:
         raise HTTPException(status_code=404, detail="Media not found")
 
+    # Fetch all results linked to this media
     results = db.query(models.AnalysisResult).filter(models.AnalysisResult.media_id == media_id).all()
     
+    # Convert from string (JSON) back to Python dictionaries for the response
     formatted_results = {}
     for res in results:
         formatted_results[res.module_name] = json.loads(res.result_data)
         
     return formatted_results
-
-
-@app.get("/media/{media_id}/segmentation")
-def get_segmentation_frames(
-    media_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Returns all segmentation frames for a media file.
-    Consumed by AnalysisReport.jsx to drive the canvas overlay.
-
-    Response shape:
-    {
-        "frames": [
-            {
-                "timestamp_ms": 0,
-                "segments": [
-                    { "class": "HealthyTree", "mask_rle": [...], "width": 512, "height": 512, "confidence": 0.94 },
-                    ...
-                ]
-            },
-            ...
-        ]
-    }
-    """
-    media_item = db.query(models.MediaFile).filter(
-        models.MediaFile.id == media_id,
-        models.MediaFile.owner_id == current_user.id
-    ).first()
-    if not media_item:
-        raise HTTPException(status_code=404, detail="Media not found")
-
-    rows = (
-        db.query(models.SegmentationFrame)
-        .filter(models.SegmentationFrame.media_id == media_id)
-        .order_by(models.SegmentationFrame.timestamp_ms)
-        .all()
-    )
-
-    frames = [
-        {
-            "timestamp_ms": row.timestamp_ms,
-            "segments":     json.loads(row.segments_json),
-        }
-        for row in rows
-    ]
-
-    return {"frames": frames}
 
 
 @app.get("/dashboard/stats")

@@ -10,7 +10,7 @@ export default function AIModels() {
         
         <div className="border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 rounded-2xl p-6 relative overflow-hidden transition-colors">
           <div className="absolute top-4 right-4 bg-cyan-500 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wide">Active</div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 transition-colors">GeoNet 2.0</h3>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 transition-colors">SkyNet 1.0</h3>
           <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors">Core semantic segmentation model. Detects water, roads, infrastructure, and bare land.</p>
           <button className="text-sm font-semibold text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 transition-colors">View Documentation &rarr;</button>
         </div>
