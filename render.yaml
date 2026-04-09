@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: sky-innovators-backend
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main_progress:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    # Install FFmpeg system package so OpenCV and PyAV can decode H.264 video
+    # Without this cv2.VideoCapture cannot open MP4 files on Render
+    nativePackages:
+      - ffmpeg
