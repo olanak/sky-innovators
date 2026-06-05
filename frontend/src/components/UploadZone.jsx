@@ -4,17 +4,17 @@ import { API_URL } from '../config.js';
 // ── Progress step definitions ─────────────────────────────────────
 const STEPS = [
   { key: 'uploading',    label: 'Saving file',          icon: '📁' },
-  { key: 'metrics',      label: 'AI analysis',           icon: '🧠' },
-  { key: 'segmentation', label: 'Generating overlays',   icon: '🗺️'  },
-  { key: 'saving',       label: 'Saving to database',    icon: '💾' },
-  { key: 'done',         label: 'Complete',              icon: '✅' },
+  { key: 'metrics',      label: 'AI analysis',          icon: '🧠' },
+  { key: 'segmentation', label: 'Generating overlays',  icon: '🗺️'  },
+  { key: 'saving',       label: 'Saving to database',   icon: '💾' },
+  { key: 'done',         label: 'Complete',             icon: '✅' },
 ];
 
 export default function UploadZone({ preselectedModule, onUploadSuccess, projectId, existingFile }) {
   const [isDragging, setIsDragging]       = useState(false);
   const [file, setFile]                   = useState(existingFile || null);
   const [isUploading, setIsUploading]     = useState(false);
-  const [uploadStatus, setUploadStatus]   = useState(null);
+  const [uploadStatus, setUploadStatus]   = useState(null); // Now stores the actual error string
 
   // Progress state
   const [progress, setProgress]           = useState(null);
@@ -71,7 +71,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       let mediaId, filename;
 
       if (isExisting) {
-        // Existing file — use the old analyze endpoint which we keep unchanged
         const body = new FormData();
         body.append('modules', JSON.stringify(modulesToRun));
 
@@ -81,11 +80,21 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
           body,
         });
 
-        if (!res.ok) { setUploadStatus('error'); setIsUploading(false); return; }
+        // 🟢 FIX: Extract FastAPI detail message for existing files
+        if (!res.ok) {
+          let errMsg = 'Failed to analyze existing file.';
+          try {
+            const errData = await res.json();
+            errMsg = errData.detail || errData.error || errMsg;
+          } catch (_) {}
+          
+          setUploadStatus(errMsg); 
+          setIsUploading(false); 
+          setProgress(null);
+          return; 
+        }
         const result = await res.json();
 
-        // Existing file analyze endpoint returns results synchronously
-        // (no SSE needed — it's re-analyzing something already stored)
         setProgress({ pct: 100, step: 'done', message: 'Analysis complete' });
         setIsUploading(false);
         onUploadSuccess({
@@ -112,7 +121,20 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
         body,
       });
 
-      if (!uploadRes.ok) { setUploadStatus('error'); setIsUploading(false); return; }
+      // 🟢 FIX: Extract FastAPI detail message for uploads
+      if (!uploadRes.ok) { 
+        let errMsg = 'Upload failed. Please check the file.';
+        try {
+          const errData = await uploadRes.json();
+          errMsg = errData.detail || errData.error || errMsg;
+        } catch (_) {}
+
+        setUploadStatus(errMsg); 
+        setIsUploading(false); 
+        setProgress(null);
+        return; 
+      }
+      
       const uploadData = await uploadRes.json();
       mediaId  = uploadData.file.id;
       filename = uploadData.file.filename;
@@ -123,14 +145,15 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       const modulesParam = encodeURIComponent(JSON.stringify(modulesToRun));
       const sseUrl = `${API_URL}upload/${mediaId}/analyze-stream?modules=${modulesParam}&token=${token}`;
 
-      // Close any existing connection
       eventSourceRef.current?.close();
       const es = new EventSource(sseUrl);
       eventSourceRef.current = es;
 
       es.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        // Handle keepalive pings safely
+        if (event.data === ": ping") return; 
 
+        const data = JSON.parse(event.data);
         setProgress({ pct: data.pct, step: data.step, message: data.message });
 
         if (data.step === 'done') {
@@ -145,25 +168,34 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
           });
         }
 
+        // 🟢 FIX: Extract the specific MobileCLIP rejection reason from SSE
         if (data.step === 'error') {
           es.close();
           setIsUploading(false);
-          setUploadStatus('error');
+          const rawMessage = data.message || 'An error occurred during AI analysis.';
+          // Regex removes " (XX% confidence)" from the string
+          const cleanMessage = rawMessage.replace(/\s*\(\d+% confidence\)/g, '');
+          // Grab data.message instead of hardcoding 'error'
+          setUploadStatus(cleanMessage);
           setProgress(null);
-          console.error('Analysis error:', data.message);
         }
       };
 
       es.onerror = () => {
         es.close();
         setIsUploading(false);
-        setUploadStatus('error');
+        setUploadStatus('Lost connection to the analysis stream.');
         setProgress(null);
       };
 
     } catch (error) {
       console.error('Upload failed', error);
-      setUploadStatus('error');
+      // 🟢 FIX: Differentiate network errors vs JS exceptions
+      const msg = error.message === 'Failed to fetch' 
+        ? 'Network error: Could not reach the server.' 
+        : error.message;
+      
+      setUploadStatus(msg);
       setIsUploading(false);
       setProgress(null);
     }
@@ -172,7 +204,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
   const canUpload = (file || existingFile) &&
     (preselectedModule || Object.values(selectedModules).some(v => v));
 
-  // Which step index are we on?
   const currentStepIdx = progress
     ? STEPS.findIndex(s => s.key === progress.step)
     : -1;
@@ -271,8 +302,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       {/* ── REAL-TIME PROGRESS BAR ────────────────────────────────── */}
       {progress && (
         <div className="w-full max-w-xl mt-6 animate-fade-in">
-
-          {/* Percentage bar */}
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate pr-4">
               {progress.message}
@@ -301,7 +330,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
             {STEPS.map((step, idx) => {
               const isDone    = idx < currentStepIdx || progress.step === 'done';
               const isActive  = step.key === progress.step && progress.step !== 'done';
-              const isPending = idx > currentStepIdx && progress.step !== 'done';
               return (
                 <div key={step.key} className="flex flex-col items-center gap-1 flex-1">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all duration-300 ${
@@ -320,10 +348,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
                   }`}>
                     {step.label}
                   </span>
-                  {/* Connector line between steps */}
-                  {idx < STEPS.length - 1 && (
-                    <div className={`absolute hidden`}/>
-                  )}
                 </div>
               );
             })}
@@ -347,10 +371,16 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
         </div>
       )}
 
-      {uploadStatus === 'error' && !progress && (
-        <p className="text-red-500 text-xs font-medium mt-3 animate-pulse">
-          Analysis failed. Please check your backend connection.
-        </p>
+      {/* 🟢 FIX: Enhanced dynamic error display component */}
+      {typeof uploadStatus === 'string' && !progress && (
+        <div className="w-full max-w-xl mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl animate-fade-in">
+          <p className="text-red-600 dark:text-red-400 text-sm font-medium flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {uploadStatus}
+          </p>
+        </div>
       )}
 
       <button

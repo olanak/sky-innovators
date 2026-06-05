@@ -220,49 +220,6 @@ def _read_first_video_frame(file_path: str) -> np.ndarray:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def check_image_relevance(filename: str) -> dict:
-    """
-    Calls the HF Space /check endpoint to verify the image looks like
-    drone forest footage before running expensive segmentation.
-
-    Returns a dict with at least:
-      { "is_valid": bool, "confidence": float, "reason": str (if invalid) }
-
-    On network failure, returns is_valid=True so the system fails open
-    (we'd rather process a maybe-invalid image than reject a real one
-    due to transient network issues).
-    """
-    _check_api_url()
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
-
-    try:
-        if is_video:
-            bgr = _read_first_video_frame(file_path)
-        else:
-            bgr = cv2.imread(file_path)
-            if bgr is None:
-                return {"is_valid": False, "reason": f"Cannot read image: {filename}"}
-
-        jpg_bytes = _encode_frame_as_jpg(bgr)
-        headers   = {"Content-Type": "application/octet-stream"}
-        if HF_TOKEN:
-            headers["Authorization"] = f"Bearer {HF_TOKEN}"
-
-        response = http.post(
-            f"{MODEL_API_URL}/check",
-            data=jpg_bytes,
-            headers=headers,
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json()
-
-    except Exception as e:
-        print(f"[SkyInnovators] Relevance check failed (failing open): {e}")
-        return {"is_valid": True, "confidence": 0.0, "reason": ""}
-
-
 def run_ai_logic(filename: str, modules: list[str]) -> dict:
     """
     Runs model on the first frame and returns scalar metrics.

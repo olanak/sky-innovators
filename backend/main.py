@@ -33,6 +33,7 @@ from sky_innovators_inference import (
     run_ai_logic,
     generate_segmentation_for_media,
     save_segmentation_frames,
+    check_image_relevance,
 )
 
 # Use your existing pwd_context if you already have one defined
@@ -231,8 +232,12 @@ async def upload_drone_footage(
         file_bytes = await file.read()
         file_size_mb = round(len(file_bytes) / (1024 * 1024), 2)
 
+        # Use timestamp + user_id + 6-char uuid to prevent filename collisions
+        # when multiple users upload simultaneously at the same second
+        import uuid
+        unique_suffix = uuid.uuid4().hex[:6]
         timestamp = int(time.time())
-        safe_filename = f"{timestamp}_{file.filename}"
+        safe_filename = f"{timestamp}_{current_user.id}_{unique_suffix}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, safe_filename)
 
         with open(file_path, "wb") as f:
@@ -351,7 +356,37 @@ async def analyze_stream(
         async def produce():
             """Runs the full analysis pipeline and pushes events into the queue."""
             try:
-                await queue.put(sse("uploading", 10, "File saved to storage"))
+                # ── Step 0 — CLIP relevance check ────────────────────────────
+                # Reject obvious non-forest images (selfies, screenshots, indoor
+                # photos, etc.) before running expensive SegFormer inference.
+                await queue.put(sse("validating", 5, "Checking image content..."))
+
+                check_result = await asyncio.to_thread(
+                    check_image_relevance, media_item.filename
+                )
+
+                if not check_result.get("is_valid", True):
+                    reason = check_result.get(
+                        "reason",
+                        "This doesn't look like drone forest footage."
+                    )
+                    # Mark the media as rejected in the DB
+                    def _mark_rejected():
+                        fresh_db = database.SessionLocal()
+                        try:
+                            record = fresh_db.query(models.MediaFile).filter(
+                                models.MediaFile.id == media_id
+                            ).first()
+                            if record:
+                                record.status = "Rejected"
+                                fresh_db.commit()
+                        finally:
+                            fresh_db.close()
+                    await asyncio.to_thread(_mark_rejected)
+                    await queue.put(sse("error", 0, reason))
+                    return
+
+                await queue.put(sse("uploading", 10, "Image accepted — preparing for AI..."))
 
                 # ── Run inference in a thread pool ────────────────────────────
                 # run_ai_logic() and generate_segmentation_for_media() are
