@@ -220,6 +220,7 @@ async def upload_drone_footage(
     file: UploadFile = File(...),
     modules: str = Form(...),
     project_id: Optional[int] = Form(None),
+    model: str = Form("segformer"),
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -227,6 +228,10 @@ async def upload_drone_footage(
     Phase 1: Save the file to disk and create the DB record immediately.
     Returns media_id so the frontend can open the SSE progress stream.
     AI analysis is NOT run here — it runs in /upload/{media_id}/analyze-stream.
+
+    The `model` form field is one of "segformer" (default) or "ensemble" — it
+    is forwarded to the SSE stream via the URL query string when the client
+    opens the progress connection.
     """
     try:
         file_bytes = await file.read()
@@ -287,6 +292,7 @@ async def analyze_stream(
     media_id: int,
     modules: str,
     token: str,
+    model: str = "segformer",
     db: Session = Depends(get_db),
 ):
     """
@@ -303,7 +309,8 @@ async def analyze_stream(
         { "step": "error",        "pct": 0,  "message": "..." }
 
     Auth is passed as a query param (token=) because EventSource doesn't
-    support custom headers.
+    support custom headers. Same for `model` — frontend appends &model=...
+    to choose between SegFormer (default) and the Ensemble Space.
     """
     # Authenticate via query param (EventSource limitation)
     credentials_exception = HTTPException(status_code=401, detail="Invalid token")
@@ -370,19 +377,29 @@ async def analyze_stream(
                         "reason",
                         "This doesn't look like drone forest footage."
                     )
-                    # Mark the media as rejected in the DB
-                    def _mark_rejected():
+                    # Delete the media record + file from disk so rejected
+                    # uploads never appear in the user's media library.
+                    def _delete_rejected():
                         fresh_db = database.SessionLocal()
                         try:
                             record = fresh_db.query(models.MediaFile).filter(
                                 models.MediaFile.id == media_id
                             ).first()
                             if record:
-                                record.status = "Rejected"
+                                # Remove file from disk (best-effort)
+                                try:
+                                    file_path = os.path.join("uploaded_media", record.filename)
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                except Exception as e:
+                                    print(f"[Reject] file cleanup failed: {e}")
+                                # CASCADE will remove any analysis_results /
+                                # segmentation_frames that were created
+                                fresh_db.delete(record)
                                 fresh_db.commit()
                         finally:
                             fresh_db.close()
-                    await asyncio.to_thread(_mark_rejected)
+                    await asyncio.to_thread(_delete_rejected)
                     await queue.put(sse("error", 0, reason))
                     return
 
@@ -397,15 +414,15 @@ async def analyze_stream(
                 # asyncio.to_thread() runs them in a thread pool executor so the
                 # event loop stays free to flush SSE frames and handle keepalives.
 
-                await queue.put(sse("metrics", 25, "Sending to AI model..."))
+                await queue.put(sse("metrics", 25, f"Sending to AI model ({model})..."))
                 ai_results = await asyncio.to_thread(
-                    run_ai_logic, media_item.filename, module_list
+                    run_ai_logic, media_item.filename, module_list, model
                 )
                 await queue.put(sse("metrics", 50, "AI metrics complete"))
 
                 await queue.put(sse("segmentation", 60, "Generating segmentation masks..."))
                 seg_frames = await asyncio.to_thread(
-                    generate_segmentation_for_media, media_item.filename, module_list
+                    generate_segmentation_for_media, media_item.filename, module_list, model
                 )
                 await queue.put(sse("segmentation", 80, f"Masks ready ({len(seg_frames)} frames)"))
 
@@ -504,6 +521,7 @@ def delete_media(media_id: int, db: Session = Depends(get_db), current_user: mod
 async def analyze_media(
     media_id: int, 
     modules: str = Form(...), # Receive the modules to run
+    model: str = Form("segformer"),
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(get_current_user)
 ):
@@ -517,7 +535,7 @@ async def analyze_media(
 
     # 1. Run the "Pluggable" AI logic
     module_list = json.loads(modules)
-    ai_results = run_ai_logic(media_item.filename, module_list)
+    ai_results = run_ai_logic(media_item.filename, module_list, model)
 
     # 2. Save each module result to the database
     for module, data in ai_results.items():

@@ -66,10 +66,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
 
     const token = sessionStorage.getItem('sky_token');
 
-    // Read the user's chosen model from the Dashboard toggle.
-    // Defaults to "segformer" if nothing is saved yet.
-    const modelChoice = localStorage.getItem('sky_model') || 'segformer';
-
     try {
       // ── Phase 1: upload file / trigger analyze ─────────────────
       let mediaId, filename;
@@ -77,7 +73,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       if (isExisting) {
         const body = new FormData();
         body.append('modules', JSON.stringify(modulesToRun));
-        body.append('model', modelChoice);
 
         const res = await fetch(`${API_URL}media/${existingFile.id}/analyze`, {
           method: 'PUT',
@@ -116,7 +111,6 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
       const body = new FormData();
       body.append('file', file);
       body.append('modules', JSON.stringify(modulesToRun));
-      body.append('model', modelChoice);
       if (projectId) body.append('project_id', projectId);
 
       setProgress({ pct: 8, step: 'uploading', message: 'Uploading file to server…' });
@@ -149,7 +143,7 @@ export default function UploadZone({ preselectedModule, onUploadSuccess, project
 
       // ── Phase 2: open SSE stream for AI progress ───────────────
       const modulesParam = encodeURIComponent(JSON.stringify(modulesToRun));
-      const sseUrl = `${API_URL}upload/${mediaId}/analyze-stream?modules=${modulesParam}&model=${modelChoice}&token=${token}`;
+      const sseUrl = `${API_URL}upload/${mediaId}/analyze-stream?modules=${modulesParam}&token=${token}`;
 
       eventSourceRef.current?.close();
       const es = new EventSource(sseUrl);

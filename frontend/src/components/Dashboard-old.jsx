@@ -31,17 +31,6 @@ export default function Dashboard() {
     return sessionStorage.getItem('sky_theme') === 'dark';
   });
 
-  // Model preference — "segformer" (default, SeG-only) or "ensemble" (SeG+EB2)
-  // Persists across sessions in localStorage so the choice survives logout/login.
-  const [modelChoice, setModelChoice] = useState(() => {
-    return localStorage.getItem('sky_model') || 'segformer';
-  });
-
-  const handleModelChange = (choice) => {
-    setModelChoice(choice);
-    localStorage.setItem('sky_model', choice);
-  };
-
   const [user, setUser] = useState({ name: 'User', email: 'Loading...' });
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
@@ -223,33 +212,6 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="flex items-center gap-3">
-            {/* Model Selector — segmented toggle */}
-            <div
-              className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-full p-0.5 border border-gray-200 dark:border-gray-700"
-              title="Choose which AI model to use for analysis"
-            >
-              <button
-                onClick={() => handleModelChange('segformer')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-                  modelChoice === 'segformer'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
-              >
-                SeG-only
-              </button>
-              <button
-                onClick={() => handleModelChange('ensemble')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-                  modelChoice === 'ensemble'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
-              >
-                SeG+EB2
-              </button>
-            </div>
-
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
               className="p-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"

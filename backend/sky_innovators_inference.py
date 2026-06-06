@@ -15,10 +15,30 @@ import numpy as np
 import requests as http
 
 UPLOAD_DIR      = "uploaded_media"
+
+# ── SegFormer Space (default) ────────────────────────────────────────────────
 MODEL_API_URL   = os.getenv("MODEL_API_URL", "").rstrip("/")
 HF_TOKEN        = os.getenv("HF_TOKEN", "")
+
+# ── Ensemble Space (friend's account, hosted separately) ─────────────────────
+# Each HF token only works for Spaces on the account that issued it, which
+# is why we keep two separate tokens here.
+MODEL_API_URL_ENSEMBLE = os.getenv("MODEL_API_URL_ENSEMBLE", "").rstrip("/")
+HF_TOKEN_ENSEMBLE      = os.getenv("HF_TOKEN_ENSEMBLE", "")
+
 FRAME_STEP      = int(os.getenv("FRAME_STEP", 30))    # default 30 = 1fps at 30fps video
 REQUEST_TIMEOUT = int(os.getenv("MODEL_TIMEOUT", 120))
+
+
+def _get_model_endpoint(model: str) -> tuple[str, str]:
+    """
+    Returns (api_url, hf_token) for the chosen model.
+    Falls back to SegFormer if the ensemble isn't configured (e.g. local dev
+    where only one Space is set up).
+    """
+    if model == "ensemble" and MODEL_API_URL_ENSEMBLE:
+        return MODEL_API_URL_ENSEMBLE, HF_TOKEN_ENSEMBLE
+    return MODEL_API_URL, HF_TOKEN
 
 # Hard cap on how many frames to process per video.
 # At 25s per frame on CPU: 8 frames = ~200s max processing time.
@@ -44,8 +64,10 @@ MODULE_METRIC_KEYS = {
 }
 
 
-def _check_api_url():
-    if not MODEL_API_URL:
+def _check_api_url(url: str = None):
+    """Validates that the chosen model's API URL is configured."""
+    target = url if url is not None else MODEL_API_URL
+    if not target:
         raise EnvironmentError(
             "MODEL_API_URL is not set. "
             "Add MODEL_API_URL=https://your-hf-space.hf.space to your environment variables."
@@ -58,18 +80,20 @@ def _encode_frame_as_jpg(bgr: np.ndarray) -> bytes:
     return encoded.tobytes()
 
 
-def _call_predict(bgr: np.ndarray) -> dict:
-    """POST one frame to the HF Space /predict endpoint."""
-    _check_api_url()
+def _call_predict(bgr: np.ndarray, model: str = "segformer") -> dict:
+    """POST one frame to the chosen Space's /predict endpoint."""
+    api_url, token = _get_model_endpoint(model)
+    _check_api_url(api_url)
+
     jpg_bytes = _encode_frame_as_jpg(bgr)
 
     headers = {"Content-Type": "application/octet-stream"}
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     try:
         response = http.post(
-            f"{MODEL_API_URL}/predict",
+            f"{api_url}/predict",
             data=jpg_bytes,
             headers=headers,
             timeout=REQUEST_TIMEOUT,
@@ -78,12 +102,12 @@ def _call_predict(bgr: np.ndarray) -> dict:
         return response.json()
     except http.exceptions.ConnectionError:
         raise RuntimeError(
-            f"Cannot reach model API at {MODEL_API_URL}. "
-            "Check MODEL_API_URL environment variable."
+            f"Cannot reach model API at {api_url} (model={model}). "
+            "Check MODEL_API_URL / MODEL_API_URL_ENSEMBLE environment variables."
         )
     except http.exceptions.Timeout:
         raise RuntimeError(
-            f"Model API timed out after {REQUEST_TIMEOUT}s. "
+            f"Model API timed out after {REQUEST_TIMEOUT}s (model={model}). "
             "Try increasing MODEL_TIMEOUT in your environment variables."
         )
 
@@ -225,6 +249,10 @@ def check_image_relevance(filename: str) -> dict:
     Calls the HF Space /check endpoint to verify the image looks like
     drone forest footage before running expensive segmentation.
 
+    Always uses the SegFormer Space (only that one has /check — MobileCLIP
+    is model-agnostic so there's no need to duplicate it on the ensemble
+    Space).
+
     Returns a dict with at least:
       { "is_valid": bool, "confidence": float, "reason": str (if invalid) }
 
@@ -232,7 +260,7 @@ def check_image_relevance(filename: str) -> dict:
     (we'd rather process a maybe-invalid image than reject a real one
     due to transient network issues).
     """
-    _check_api_url()
+    _check_api_url(MODEL_API_URL)   # SegFormer URL specifically
     file_path = os.path.join(UPLOAD_DIR, filename)
     is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
 
@@ -263,10 +291,14 @@ def check_image_relevance(filename: str) -> dict:
         return {"is_valid": True, "confidence": 0.0, "reason": ""}
 
 
-def run_ai_logic(filename: str, modules: list[str]) -> dict:
+def run_ai_logic(filename: str, modules: list[str], model: str = "segformer") -> dict:
     """
     Runs model on the first frame and returns scalar metrics.
     Called once per upload from main.py.
+
+    The `model` argument selects which HF Space to call:
+      "segformer" → MODEL_API_URL          (default, SegFormer-only)
+      "ensemble"  → MODEL_API_URL_ENSEMBLE  (Hybrid Ensemble)
     """
     file_path = os.path.join(UPLOAD_DIR, filename)
     is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
@@ -278,7 +310,7 @@ def run_ai_logic(filename: str, modules: list[str]) -> dict:
         if bgr is None:
             raise RuntimeError(f"Cannot read image: {filename}")
 
-    result = _call_predict(bgr)
+    result = _call_predict(bgr, model=model)
     all_metrics = result.get("metrics", {})
     return {
         mod: all_metrics[mod]
@@ -290,6 +322,7 @@ def run_ai_logic(filename: str, modules: list[str]) -> dict:
 def generate_segmentation_for_media(
     filename: str,
     modules:  list[str],
+    model:    str = "segformer",
 ) -> list[dict]:
     """
     Runs the model on sampled frames and returns the frames list
@@ -298,9 +331,7 @@ def generate_segmentation_for_media(
     Image  → 1 frame at timestamp_ms = 0
     Video  → up to MAX_FRAMES frames, sampled every FRAME_STEP frames
 
-    The MAX_FRAMES cap prevents timeouts on long videos:
-      8 frames × 25s/frame (CPU) = ~200s max processing time
-    Override with MAX_FRAMES env var (e.g. MAX_FRAMES=16 on GPU tier)
+    The `model` argument selects which HF Space to call (see run_ai_logic).
     """
     file_path = os.path.join(UPLOAD_DIR, filename)
     is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
@@ -311,7 +342,7 @@ def generate_segmentation_for_media(
         if bgr is None:
             raise RuntimeError(f"Cannot read image: {filename}")
 
-        result = _call_predict(bgr)
+        result = _call_predict(bgr, model=model)
         frames.append({
             "timestamp_ms": 0,
             "segments":     result.get("segments", []),
@@ -320,7 +351,7 @@ def generate_segmentation_for_media(
     else:
         print(
             f"[SkyInnovators] Processing video {filename} "
-            f"FRAME_STEP={FRAME_STEP} MAX_FRAMES={MAX_FRAMES}"
+            f"FRAME_STEP={FRAME_STEP} MAX_FRAMES={MAX_FRAMES} model={model}"
         )
         done = 0
 
@@ -329,7 +360,7 @@ def generate_segmentation_for_media(
         ):
             ts_ms = int((frame_index / fps) * 1000)
             try:
-                result = _call_predict(bgr_frame)
+                result = _call_predict(bgr_frame, model=model)
                 frames.append({
                     "timestamp_ms": ts_ms,
                     "segments":     result.get("segments", []),
