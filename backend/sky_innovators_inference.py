@@ -85,6 +85,10 @@ def _call_predict(bgr: np.ndarray, model: str = "segformer") -> dict:
     api_url, token = _get_model_endpoint(model)
     _check_api_url(api_url)
 
+    import sys
+    sys.stdout.write(f"[SkyInnovators] → /predict  model={model}  url={api_url}\n")
+    sys.stdout.flush()
+
     jpg_bytes = _encode_frame_as_jpg(bgr)
 
     headers = {"Content-Type": "application/octet-stream"}

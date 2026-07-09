@@ -236,7 +236,7 @@ export default function Dashboard() {
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                 }`}
               >
-                SeG-only
+                SeG-V1
               </button>
               <button
                 onClick={() => handleModelChange('ensemble')}
@@ -246,7 +246,7 @@ export default function Dashboard() {
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                 }`}
               >
-                SeG+EB2
+                SeG-V2
               </button>
             </div>
 
