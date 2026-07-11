@@ -414,7 +414,7 @@ async def analyze_stream(
                 # asyncio.to_thread() runs them in a thread pool executor so the
                 # event loop stays free to flush SSE frames and handle keepalives.
 
-                await queue.put(sse("metrics", 25, f"Sending to AI model ({model})..."))
+                await queue.put(sse("metrics", 25, f"Sending to AI model....."))
                 ai_results = await asyncio.to_thread(
                     run_ai_logic, media_item.filename, module_list, model
                 )
