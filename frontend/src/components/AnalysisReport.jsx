@@ -304,17 +304,21 @@ export default function AnalysisReport({ analysisData, onBack }) {
 
       <div className="flex justify-between items-center mb-6">
         <button onClick={onBack}
-          className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-cyan-600 dark:text-gray-400 transition-colors">
+          className="flex items-center gap-2 text-sm font-semibold transition-colors"
+          style={{ color: 'var(--sky-ink-soft)' }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--sky-accent)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--sky-ink-soft)'}>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
           </svg>
-          Back to Library
+          Back
         </button>
         <button onClick={handleExportCSV} disabled={isExporting}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-50">
+          className="flex items-center gap-2 text-white px-5 py-2.5 rounded-full text-xs font-bold transition-all disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg, var(--sky-accent), var(--sky-accent-2))' }}>
           {isExporting
             ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
-            : 'Export CSV'}
+            : 'Export report'}
         </button>
       </div>
 
@@ -375,9 +379,9 @@ export default function AnalysisReport({ analysisData, onBack }) {
           </div>
 
           {/* Controls */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-5 rounded-3xl shadow-sm space-y-4">
+          <div className="p-5 rounded-3xl space-y-4" style={{ background: 'var(--sky-card)', border: '1px solid var(--sky-line)' }}>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--sky-ink-soft)' }}>
                 Layer Visibility
               </p>
               <div className="flex flex-wrap gap-2">
@@ -402,16 +406,17 @@ export default function AnalysisReport({ analysisData, onBack }) {
             </div>
 
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--sky-ink-soft)' }}>
                 Overlay Opacity — {opacity}%
               </p>
               <input type="range" min={0} max={100} value={opacity}
                 onChange={e => setOpacity(Number(e.target.value))}
-                className="w-full accent-cyan-500 h-1.5 rounded-full"/>
+                className="w-full h-1.5 rounded-full"
+                style={{ accentColor: 'var(--sky-accent)' }}/>
             </div>
 
-            <p className="text-xs text-gray-400 leading-relaxed">
-              SkyNet 1.0 segmentation overlay for{' '}
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--sky-ink-soft)' }}>
+              Segmentation overlay for{' '}
               {isVideo ? 'video frames (synced to playback)' : 'image pixels'}.
               Toggle classes or adjust opacity to inspect specific zones.
             </p>
@@ -420,19 +425,19 @@ export default function AnalysisReport({ analysisData, onBack }) {
 
         {/* RIGHT: Metrics */}
         <div className="space-y-6">
-          <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-xl">
-            <h2 className="text-xl font-bold mb-1">Results Summary</h2>
-            <p className="text-xs text-gray-400 mb-6 truncate">{displayFilename}</p>
+          <div className="p-6 rounded-3xl" style={{ background: 'var(--sky-card)', border: '1px solid var(--sky-line)' }}>
+            <h2 className="text-xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--sky-ink)' }}>Results Summary</h2>
+            <p className="text-xs mb-6 truncate" style={{ color: 'var(--sky-ink-soft)' }}>{displayFilename}</p>
             <div className="space-y-4">
               {Object.entries(analysisData.aiResults || {}).map(([module, data]) => (
-                <div key={module} className="border-b border-white/10 pb-4 last:border-0">
-                  <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2">
+                <div key={module} className="pb-4 last:pb-0" style={{ borderBottom: '1px solid var(--sky-line)' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--sky-accent)' }}>
                     {module}
                   </p>
                   {Object.entries(data).map(([key, val]) => (
-                    <div key={key} className="flex justify-between items-center mb-1">
-                      <span className="text-xs text-gray-300 capitalize">{key}</span>
-                      <span className="text-sm font-bold text-right ml-2">{val}</span>
+                    <div key={key} className="flex justify-between items-baseline mb-1.5 gap-3">
+                      <span className="text-xs capitalize" style={{ color: 'var(--sky-ink-soft)' }}>{key}</span>
+                      <span className="text-sm font-semibold text-right" style={{ color: 'var(--sky-ink)' }}>{val}</span>
                     </div>
                   ))}
                 </div>
@@ -440,8 +445,8 @@ export default function AnalysisReport({ analysisData, onBack }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-5 rounded-3xl shadow-sm">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+          <div className="p-5 rounded-3xl" style={{ background: 'var(--sky-card)', border: '1px solid var(--sky-line)' }}>
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--sky-ink-soft)' }}>
               Colour Legend
             </p>
             <div className="space-y-2">
@@ -449,7 +454,7 @@ export default function AnalysisReport({ analysisData, onBack }) {
                 <div key={cls} className="flex items-center gap-2">
                   <span className="w-3 h-3 rounded-sm flex-shrink-0"
                     style={{ backgroundColor: CLASS_CONFIG[cls]?.color }}/>
-                  <span className="text-xs text-gray-600 dark:text-gray-300">
+                  <span className="text-xs" style={{ color: 'var(--sky-ink-soft)' }}>
                     {CLASS_CONFIG[cls]?.label ?? cls}
                   </span>
                 </div>
@@ -459,9 +464,9 @@ export default function AnalysisReport({ analysisData, onBack }) {
         </div>
       </div>
 
-      <div className="mt-8 text-center border-t border-gray-100 dark:border-gray-800 pt-6">
-        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium">
-          Securely generated by Sky Innovators AI Engine • SkyNet <v1 className="0">1.0</v1>• 2026
+      <div className="mt-8 text-center pt-6" style={{ borderTop: '1px solid var(--sky-line)' }}>
+        <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: 'var(--sky-ink-soft)' }}>
+          Generated by SkyInnovators AI Engine · {new Date().getFullYear()}
         </p>
       </div>
     </div>

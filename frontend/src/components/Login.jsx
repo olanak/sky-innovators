@@ -1,132 +1,83 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { API_URL } from '../config.js'; // Adjust path if needed
+import { useNavigate, Link } from 'react-router-dom';
+import { API_URL } from '../config.js';
 import { GoogleLogin } from '@react-oauth/google';
+import { getInitialTheme, applyTheme } from '../lib/theme.js';
+import { SkyLogo } from './PublicShell.jsx';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
-
-  // 👉 Changed from boolean to string view: 'login', 'signup', or 'forgot'
   const [view, setView] = useState('login');
   const isLoginView = view === 'login';
-
   const [isLoading, setIsLoading] = useState(false);
-
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
     const token = sessionStorage.getItem('sky_token');
-    if (token) {
-      navigate('/dashboard', { replace: true });
-    }
+    if (token) navigate('/dashboard', { replace: true });
   }, [navigate]);
 
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    return sessionStorage.getItem('sky_theme') === 'dark';
-  });
+  // Dark-default theme, with a toggle on this page
+  const [isDark, setIsDark] = useState(getInitialTheme);
+  useEffect(() => { applyTheme(isDark); }, [isDark]);
 
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      sessionStorage.setItem('sky_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      sessionStorage.setItem('sky_theme', 'light');
-    }
-  }, [isDarkMode]);
-
-  // --- VALIDATION HELPERS ---
-  const validateEmail = (emailStr) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(emailStr);
-  };
-
+  // ── Validation ──
+  const validateEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
   const validatePassword = (pwd) => {
     if (pwd.length < 8) return "Password must be at least 8 characters long.";
     if (!/[A-Z]/.test(pwd)) return "Password must contain at least one uppercase letter.";
     if (!/[0-9]/.test(pwd)) return "Password must contain at least one number.";
-    if (!/[!@#$%^&*]/.test(pwd)) return "Password must contain at least one special character (!@#$%^&*).";
+    if (!/[!@#$%^&*]/.test(pwd)) return "Password must contain a special character (!@#$%^&*).";
     return null;
   };
 
-  // --- REAL-TIME STATUS CHECKS ---
   const isEmailValid = email.length > 0 && validateEmail(email);
   const isEmailInvalid = email.length > 0 && !isEmailValid;
-
   const pwdError = validatePassword(password);
   const isPwdValid = isLoginView ? password.length > 0 : (password.length > 0 && pwdError === null);
   const isPwdInvalid = !isLoginView && password.length > 0 && pwdError !== null;
-
   const isConfirmPwdValid = confirmPassword.length > 0 && password === confirmPassword;
-  const isConfirmPwdInvalid = confirmPassword.length > 0 && password !== confirmPassword;
-
   const isNameValid = fullName.trim().length > 0;
-  const isNameInvalid = fullName !== '' && fullName.trim().length === 0;
 
-  // 👉 Updated form readiness logic
-  const isFormReadyToSubmit = view === 'forgot'
+  const isFormReady = view === 'forgot'
     ? isEmailValid
     : isLoginView
       ? (isEmailValid && password.length > 0)
       : (isNameValid && isEmailValid && isPwdValid && isConfirmPwdValid);
 
-  const getInputClasses = (isValid, isInvalid) => {
-    const baseClasses = "w-full pl-11 pr-11 py-3 bg-transparent border rounded-xl text-sm focus:outline-none focus:ring-1 transition-all dark:placeholder-gray-500";
-    if (isValid) return `${baseClasses} border-emerald-500 focus:border-emerald-500 focus:ring-emerald-500 bg-emerald-50/10 dark:bg-emerald-900/10 text-emerald-900 dark:text-emerald-100`;
-    if (isInvalid) return `${baseClasses} border-red-500 focus:border-red-500 focus:ring-red-500 bg-red-50/10 dark:bg-red-900/10 text-red-900 dark:text-red-100`;
-    return `${baseClasses} border-gray-200 dark:border-gray-700 focus:border-cyan-500 focus:ring-cyan-500`;
-  };
+  const inputStyle = (valid, invalid) => ({
+    width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 12, outline: 'none',
+    background: 'var(--sky-bg-soft)', color: 'var(--sky-ink)',
+    border: `1px solid ${valid ? '#22c55e' : invalid ? '#ef4444' : 'var(--sky-line)'}`,
+  });
 
-  const StatusIcon = ({ isValid, isInvalid }) => {
-    if (isValid) return <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none animate-fade-in"><svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg></div>;
-    if (isInvalid) return <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none animate-fade-in"><svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg></div>;
-    return null;
-  };
-
-  // 👉 NEW: Forgot Password Handler
   const handleForgotPassword = async (e) => {
-    e.preventDefault();
-    setErrorMessage('');
-    setSuccessMessage('');
-    setIsLoading(true);
-
+    e.preventDefault(); setErrorMessage(''); setSuccessMessage(''); setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Something went wrong");
       setSuccessMessage("If an account exists, a reset link has been sent to your email.");
-    } catch (error) {
-      setErrorMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (error) { setErrorMessage(error.message); } finally { setIsLoading(false); }
   };
 
   const handleAuth = async (e) => {
-    e.preventDefault();
-    setErrorMessage('');
-    setSuccessMessage('');
-    setIsLoading(true);
-
+    e.preventDefault(); setErrorMessage(''); setSuccessMessage(''); setIsLoading(true);
     if (view === 'signup') {
       if (!validateEmail(email)) { setErrorMessage("Please enter a valid email address."); setIsLoading(false); return; }
       if (password !== confirmPassword) { setErrorMessage("Passwords do not match. Please try again."); setIsLoading(false); return; }
       const passwordError = validatePassword(password);
       if (passwordError) { setErrorMessage(passwordError); setIsLoading(false); return; }
-
       try {
         const response = await fetch(`${API_URL}signup`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password, full_name: fullName || "Sky Innovators User" }),
         });
         const data = await response.json();
@@ -134,16 +85,11 @@ export default function Login() {
         setSuccessMessage("Account created! You may now sign in.");
         setPassword(''); setConfirmPassword(''); setEmail(''); setFullName('');
         setView('login');
-      } catch (error) {
-        setErrorMessage(error.message);
-      } finally {
-        setIsLoading(false);
-      }
+      } catch (error) { setErrorMessage(error.message); } finally { setIsLoading(false); }
     } else {
       try {
         const response = await fetch(`${API_URL}login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
         });
         const data = await response.json();
@@ -151,170 +97,159 @@ export default function Login() {
         sessionStorage.setItem("sky_token", data.access_token);
         sessionStorage.setItem("sky_user", JSON.stringify(data.user_info));
         navigate('/dashboard');
-      } catch (error) {
-        setErrorMessage(error.message);
-      } finally {
-        setIsLoading(false);
-      }
+      } catch (error) { setErrorMessage(error.message); } finally { setIsLoading(false); }
     }
   };
 
-  // 👉 NEW: Google Login Handler
   const handleGoogleLogin = async (idToken) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}auth/google`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: idToken }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: idToken }),
       });
-
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Google Auth Failed");
-
-      // Store session just like your regular login
       sessionStorage.setItem("sky_token", data.access_token);
       sessionStorage.setItem("sky_user", JSON.stringify(data.user_info));
       navigate('/dashboard');
-    } catch (error) {
-      setErrorMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (error) { setErrorMessage(error.message); } finally { setIsLoading(false); }
   };
 
   return (
-    <div className="flex min-h-screen bg-white dark:bg-gray-900 font-sans text-gray-900 dark:text-white transition-colors duration-300">
-      <div className="w-full lg:w-[45%] flex flex-col justify-between px-8 sm:px-16 md:px-24 py-10 relative z-10">
-        <div></div>
-        <div className="w-full max-w-sm mx-auto flex flex-col items-center text-center transition-all duration-300">
-          <div className="flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center shadow-md shadow-blue-500/20">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-            </div>
-            <span className="text-3xl font-bold tracking-tight">SkyInnovators</span>
+    <div className="flex min-h-screen" style={{ background: 'var(--sky-bg)', color: 'var(--sky-ink)', fontFamily: 'var(--font-body)' }}>
+      {/* LEFT — form */}
+      <div className="w-full lg:w-[46%] flex flex-col px-8 sm:px-16 md:px-20 py-8 relative">
+        {/* Top bar: back to home + theme */}
+        <div className="flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2 text-sm font-medium transition-colors"
+                style={{ color: 'var(--sky-ink-soft)' }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--sky-accent)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--sky-ink-soft)'}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            Back to home
+          </Link>
+          <button onClick={() => setIsDark(v => !v)} aria-label="Toggle theme"
+            className="w-9 h-9 grid place-items-center rounded-full transition-colors"
+            style={{ border: '1px solid var(--sky-line)', background: 'var(--sky-card)', color: 'var(--sky-ink-soft)' }}>
+            {isDark
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2m-3.5-6.5l-1.5 1.5m-9 9l-1.5 1.5m0-12l1.5 1.5m9 9l1.5 1.5" /></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>}
+          </button>
+        </div>
+
+        <div className="flex-1 flex flex-col justify-center w-full max-w-sm mx-auto">
+          <div className="flex items-center gap-2.5 mb-8">
+            <SkyLogo size={32} />
+            <span className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>SkyInnovators</span>
           </div>
 
-          <h1 className="text-2xl font-bold mb-2">
-            {view === 'forgot' ? "Reset Password" : isLoginView ? "Welcome back" : "Get started with SkyInnovators"}
+          <h1 className="text-[26px] font-bold tracking-tight mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+            {view === 'forgot' ? "Reset your password" : isLoginView ? "Welcome back" : "Create your account"}
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-8">
-            {view === 'forgot' ? "Remember your password? " : isLoginView ? "Don't have an account? " : "Already have an account? "}
+          <p className="text-sm mb-7" style={{ color: 'var(--sky-ink-soft)' }}>
+            {view === 'forgot' ? "Remember it? " : isLoginView ? "New to SkyInnovators? " : "Already have an account? "}
             <button
-              onClick={() => {
-                setView(view === 'forgot' || !isLoginView ? 'login' : 'signup');
-                setErrorMessage(''); setSuccessMessage(''); setConfirmPassword(''); setPassword('');
-              }}
-              className="text-gray-900 dark:text-white font-semibold hover:underline focus:outline-none"
-            >
-              {view === 'forgot' || !isLoginView ? "Sign in" : "Sign up"}
+              onClick={() => { setView(view === 'forgot' || !isLoginView ? 'login' : 'signup'); setErrorMessage(''); setSuccessMessage(''); setConfirmPassword(''); setPassword(''); }}
+              className="font-semibold hover:underline" style={{ color: 'var(--sky-accent)' }}>
+              {view === 'forgot' || !isLoginView ? "Sign in" : "Create one free"}
             </button>
           </p>
 
-          <div className="flex justify-center w-full mb-8">
-  {/* Google Button */}
-  <GoogleLogin
-    onSuccess={credentialResponse => {
-      handleGoogleLogin(credentialResponse.credential);
-    }}
-    onError={() => {
-      setErrorMessage("Google Login Failed");
-    }}
-    useOneTap
-    shape="circle"
-  />
-</div>
+          <div className="flex justify-center w-full mb-6">
+            <GoogleLogin onSuccess={r => handleGoogleLogin(r.credential)} onError={() => setErrorMessage("Google Login Failed")} useOneTap shape="pill" />
+          </div>
 
-          <div className="flex items-center w-full mb-8">
-            <div className="flex-1 border-t border-gray-200 dark:border-gray-700"></div>
-            <span className="px-4 text-xs text-gray-400 dark:text-gray-500">Or</span>
-            <div className="flex-1 border-t border-gray-200 dark:border-gray-700"></div>
+          <div className="flex items-center w-full mb-6">
+            <div className="flex-1 border-t" style={{ borderColor: 'var(--sky-line)' }} />
+            <span className="px-4 text-xs" style={{ color: 'var(--sky-ink-soft)' }}>or</span>
+            <div className="flex-1 border-t" style={{ borderColor: 'var(--sky-line)' }} />
           </div>
 
           {errorMessage && (
-            <div className="w-full p-3 mb-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm text-left flex items-start gap-2 animate-fade-in">
-              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <div className="w-full p-3 mb-4 rounded-xl text-sm flex items-start gap-2 animate-fade-in"
+                 style={{ background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171' }}>
+              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               <span>{errorMessage}</span>
             </div>
           )}
-
           {successMessage && (
-            <div className="w-full p-3 mb-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-700 dark:text-emerald-400 text-sm text-left flex items-start gap-2 animate-fade-in">
-              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <div className="w-full p-3 mb-4 rounded-xl text-sm flex items-start gap-2 animate-fade-in"
+                 style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e' }}>
+              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               <span>{successMessage}</span>
             </div>
           )}
 
           <div className="w-full space-y-3 mb-4">
             {view === 'signup' && (
-              <div className="relative animate-fade-in">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg className={`w-5 h-5 transition-colors ${isNameValid ? 'text-emerald-500' : isNameInvalid ? 'text-red-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></div>
-                <input type="text" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} className={getInputClasses(isNameValid, isNameInvalid)} />
-                <StatusIcon isValid={isNameValid} isInvalid={isNameInvalid} />
-              </div>
+              <input type="text" placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)}
+                style={inputStyle(isNameValid, false)} className="animate-fade-in" />
             )}
-
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg className={`w-5 h-5 transition-colors ${isEmailValid ? 'text-emerald-500' : isEmailInvalid ? 'text-red-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg></div>
-              <input type="email" placeholder="Enter email" value={email} onChange={(e) => setEmail(e.target.value)} className={getInputClasses(isEmailValid, isEmailInvalid)} />
-              <StatusIcon isValid={isEmailValid} isInvalid={isEmailInvalid} />
-            </div>
-
+            <input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)}
+              style={inputStyle(isEmailValid, isEmailInvalid)} />
             {view !== 'forgot' && (
               <>
-                <div>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg className={`w-5 h-5 transition-colors ${isPwdValid ? 'text-emerald-500' : isPwdInvalid ? 'text-red-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg></div>
-                    <input type="password" placeholder={isLoginView ? "Enter password" : "Create a password"} value={password} onChange={(e) => setPassword(e.target.value)} className={getInputClasses(isPwdValid, isPwdInvalid)} />
-                    <StatusIcon isValid={isPwdValid} isInvalid={isPwdInvalid} />
-                  </div>
-                  {!isLoginView && <p className={`text-left text-[10px] mt-2 px-2 transition-colors ${isPwdValid ? 'text-emerald-500' : isPwdInvalid ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'}`}>{isPwdValid ? "✓ Strong password" : (pwdError || "Must contain 8+ chars, 1 uppercase, 1 number, & 1 special char.")}</p>}
-                </div>
-
-                {/* 👉 ADDED: Forgot Password Trigger Link */}
+                <input type="password" placeholder={isLoginView ? "Password" : "Create a password"} value={password}
+                  onChange={(e) => setPassword(e.target.value)} style={inputStyle(isPwdValid, isPwdInvalid)} />
+                {!isLoginView && (
+                  <p className="text-left text-[10px] px-1" style={{ color: isPwdValid ? '#22c55e' : isPwdInvalid ? '#ef4444' : 'var(--sky-ink-soft)' }}>
+                    {isPwdValid ? "✓ Strong password" : (pwdError || "Must contain 8+ chars, 1 uppercase, 1 number, & 1 special char.")}
+                  </p>
+                )}
                 {isLoginView && (
                   <div className="w-full text-right">
-                    <button onClick={() => { setView('forgot'); setErrorMessage(''); setSuccessMessage(''); }} className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400 hover:underline">Forgot password?</button>
+                    <button onClick={() => { setView('forgot'); setErrorMessage(''); setSuccessMessage(''); }}
+                      className="text-[11px] font-bold hover:underline" style={{ color: 'var(--sky-accent)' }}>Forgot password?</button>
                   </div>
                 )}
-
                 {view === 'signup' && (
-                  <div className="relative mt-3 animate-fade-in">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg className={`w-5 h-5 transition-colors ${isConfirmPwdValid ? 'text-emerald-500' : isConfirmPwdInvalid ? 'text-red-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg></div>
-                    <input type="password" placeholder="Confirm password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={getInputClasses(isConfirmPwdValid, isConfirmPwdInvalid)} />
-                    <StatusIcon isValid={isConfirmPwdValid} isInvalid={isConfirmPwdInvalid} />
-                  </div>
+                  <input type="password" placeholder="Confirm password" value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)} style={inputStyle(isConfirmPwdValid, confirmPassword.length > 0 && !isConfirmPwdValid)} className="animate-fade-in" />
                 )}
               </>
             )}
           </div>
 
-          <button
-            onClick={view === 'forgot' ? handleForgotPassword : handleAuth}
-            disabled={!isFormReadyToSubmit || isLoading}
-            className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${isFormReadyToSubmit && !isLoading
-              ? 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-md shadow-cyan-500/20'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed mt-2'
-              }`}
-          >
-            {isLoading ? (
-              <><svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...</>
-            ) : (
-              view === 'forgot' ? "Send Reset Link" : isLoginView ? "Sign In" : "Create Account"
-            )}
+          <button onClick={view === 'forgot' ? handleForgotPassword : handleAuth} disabled={!isFormReady || isLoading}
+            className="w-full py-3 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2"
+            style={{
+              background: (isFormReady && !isLoading) ? 'linear-gradient(135deg, var(--sky-accent), var(--sky-accent-2))' : 'var(--sky-pill)',
+              color: (isFormReady && !isLoading) ? '#fff' : 'var(--sky-ink-soft)',
+              cursor: (isFormReady && !isLoading) ? 'pointer' : 'not-allowed',
+            }}>
+            {isLoading
+              ? <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Processing…</>
+              : (view === 'forgot' ? "Send reset link" : isLoginView ? "Sign in" : "Create account")}
           </button>
 
-          <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">By logging in or signing up, I agree to SkyInnovators' <a href="#" className="underline hover:text-gray-900 dark:hover:text-white">Terms of Service</a></p>
+          <p className="mt-6 text-xs" style={{ color: 'var(--sky-ink-soft)' }}>
+            By continuing, you agree to SkyInnovators' <a href="#" className="underline">Terms of Service</a>.
+          </p>
         </div>
-        <div className="flex flex-col items-center text-xs text-gray-400 space-y-2 pb-4"><p>Copyright © 2025-2026 SkyInnovators</p></div>
+
+        <div className="text-center text-xs" style={{ color: 'var(--sky-ink-soft)' }}>© {new Date().getFullYear()} SkyInnovators</div>
       </div>
 
-      <div className="hidden lg:flex w-[55%] bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-gray-900 dark:to-cyan-900/20 relative items-center justify-center overflow-hidden border-l border-gray-100 dark:border-gray-800 transition-colors duration-300">
-        <div className="absolute top-8 right-8 flex items-center gap-4 z-20">
-          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border border-gray-200 dark:border-gray-700 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm transition-all flex items-center justify-center w-10 h-10">{isDarkMode ? <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg> : <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>}</button>
-          <select className="bg-white/80 dark:bg-gray-800/80 dark:text-white backdrop-blur-sm border border-gray-200 dark:border-gray-700 text-sm font-medium rounded-full px-4 py-2 outline-none hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm cursor-pointer transition-all"><option>EN</option><option>TR</option></select>
+      {/* RIGHT — brand panel with new copy */}
+      <div className="hidden lg:flex w-[54%] relative items-center justify-center overflow-hidden"
+           style={{ borderLeft: '1px solid var(--sky-line)', background: 'var(--sky-bg-soft)' }}>
+        <div className="absolute inset-0" style={{ background: 'var(--sky-hero-glow)' }} />
+        {/* orbit rings */}
+        <div className="absolute rounded-full animate-pulse" style={{ width: 760, height: 760, border: '1px solid var(--sky-orbit)' }} />
+        <div className="absolute rounded-full" style={{ width: 560, height: 560, border: '1px solid var(--sky-orbit)' }} />
+        <div className="relative z-10 text-center space-y-6 max-w-md px-8">
+          <div className="w-20 h-20 rounded-2xl mx-auto flex items-center justify-center"
+               style={{ background: 'var(--sky-card)', border: '1px solid var(--sky-line)', boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }}>
+            <SkyLogo size={44} />
+          </div>
+          <h2 className="text-3xl font-bold leading-tight tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--sky-ink)' }}>
+            Turn drone footage into<br />
+            <span style={{ background: 'linear-gradient(120deg, var(--sky-accent), var(--sky-accent-2))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>forest intelligence</span>
+          </h2>
+          <p className="text-[15px] leading-relaxed" style={{ color: 'var(--sky-ink-soft)' }}>
+            Sign in to upload aerial imagery and get pixel-level maps of canopy health, dead trees, water, and terrain — in seconds.
+          </p>
         </div>
-        <div className="relative w-full h-full flex items-center justify-center opacity-80"><div className="absolute w-[800px] h-[800px] border border-cyan-100 dark:border-cyan-500/10 rounded-full animate-pulse"></div><div className="absolute w-[600px] h-[600px] border border-indigo-100 dark:border-indigo-500/10 rounded-full"></div><div className="relative z-10 text-center space-y-6 max-w-md"><div className="w-20 h-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-cyan-500/10 dark:shadow-cyan-500/5 mx-auto flex items-center justify-center border border-gray-100 dark:border-gray-700"><svg className="w-10 h-10 text-cyan-500 dark:text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div><h2 className="text-3xl font-bold text-gray-900 dark:text-white leading-tight">Precision AI for <br /> Aerial Intelligence</h2><p className="text-gray-500 dark:text-gray-400">Upload telemetry and media to extract actionable insights in real-time.</p></div></div>
       </div>
     </div>
   );

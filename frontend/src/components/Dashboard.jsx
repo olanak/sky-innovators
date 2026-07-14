@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_URL } from '../config.js'; 
-import Projects from './pro'; 
-import UploadZone from './UploadZone';
-import AIModels from './model';      
+import { API_URL } from '../config.js';
+import { getInitialTheme, applyTheme } from '../lib/theme.js';
+import AppNav from './AppNav.jsx';
+import NewAnalysis from './NewAnalysis.jsx';
+import Projects from './pro';
 import TelemetryData from './TelemetryData';
 import ExportedReports from './ExportedReports';
 import AccountSettings from './AccountSettings';
@@ -12,86 +13,39 @@ import MediaLibrary from './MediaLibrary';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('Home');
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [activeAnalysisModule, setActiveAnalysisModule] = useState(null);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [activeAnalysisData, setActiveAnalysisData] = useState(null);
-  const navigate = useNavigate();
   const [lastTab, setLastTab] = useState('Home');
+  const [analysisData, setAnalysisData] = useState(null);
+  const [analysisModule, setAnalysisModule] = useState(null);
+  const [existingFile, setExistingFile] = useState(null);
+  const navigate = useNavigate();
 
-  // Stats and Theme state
-  const [stats, setStats] = useState({
-    total_projects: 0,
-    total_files: 0,
-    total_area_scanned: '0 Ha',
-    active_models: 0
-  });
+  const [stats, setStats] = useState({ total_projects: 0, total_files: 0, total_area_scanned: '0 Ha', active_models: 0 });
+  const [isDark, setIsDark] = useState(getInitialTheme);
+  const [modelChoice, setModelChoice] = useState(() => localStorage.getItem('sky_model') || 'segformer');
+  const [user, setUser] = useState({ name: 'User', email: 'Loading…' });
+  const [authChecking, setAuthChecking] = useState(true);
 
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    return sessionStorage.getItem('sky_theme') === 'dark';
-  });
+  useEffect(() => { applyTheme(isDark); }, [isDark]);
 
-  // Model preference — "segformer" (default, SeG-only) or "ensemble" (SeG+EB2)
-  // Persists across sessions in localStorage so the choice survives logout/login.
-  const [modelChoice, setModelChoice] = useState(() => {
-    return localStorage.getItem('sky_model') || 'segformer';
-  });
+  const handleModelChange = (c) => { setModelChoice(c); localStorage.setItem('sky_model', c); };
 
-  const handleModelChange = (choice) => {
-    setModelChoice(choice);
-    localStorage.setItem('sky_model', choice);
-  };
-
-  const [user, setUser] = useState({ name: 'User', email: 'Loading...' });
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
-
-  // Fetch Dashboard Stats
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      const token = sessionStorage.getItem('sky_token');
-      if (!token) return;
-
-      try {
-        const response = await fetch(`${API_URL}dashboard/stats`, {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setStats(data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch dashboard stats", error);
-      }
-    };
-
-    if (activeTab === 'Home') {
-      fetchDashboardData();
-    }
-  }, [activeTab]);
-
-  // Auth and Theme Logic
+  // Auth + user bootstrap
   useEffect(() => {
     const token = sessionStorage.getItem('sky_token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
+    if (!token) { navigate('/login'); return; }
+    const stored = sessionStorage.getItem('sky_user');
+    if (stored) setUser(JSON.parse(stored));
+    setAuthChecking(false);
+  }, [navigate]);
 
-    const storedUser = sessionStorage.getItem('sky_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-
-    setIsAuthChecking(false);
-
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      sessionStorage.setItem('sky_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      sessionStorage.setItem('sky_theme', 'light');
-    }
-  }, [isDarkMode, navigate]);
+  // Stats on Home
+  useEffect(() => {
+    if (activeTab !== 'Home') return;
+    const token = sessionStorage.getItem('sky_token');
+    if (!token) return;
+    fetch(`${API_URL}dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(d => d && setStats(d)).catch(() => {});
+  }, [activeTab]);
 
   const handleLogout = () => {
     sessionStorage.removeItem('sky_token');
@@ -99,319 +53,121 @@ export default function Dashboard() {
     navigate('/');
   };
 
-  if (isAuthChecking) {
-    return <div className="h-screen w-full bg-gray-50 dark:bg-gray-900 transition-colors duration-300"></div>;
-  }
-
-  // Helper to handle Analysis view from Library or Projects
-  const handleViewAnalysis = async (asset) => {
+  // Load a completed analysis into the report view
+  const viewAnalysis = async (asset) => {
     setLastTab(activeTab);
     const token = sessionStorage.getItem('sky_token');
     try {
-      const response = await fetch(`${API_URL}media/${asset.id}/results`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-      if (response.ok) {
-        const results = await response.json();
-        setActiveAnalysisData({
-          id: asset.id,
-          filename: asset.filename,
-          aiResults: results
-        });
+      const res = await fetch(`${API_URL}media/${asset.id}/results`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const results = await res.json();
+        setAnalysisData({ id: asset.id, filename: asset.filename, aiResults: results });
         setActiveTab('AnalysisReport');
       }
-    } catch (error) {
-      console.error("Failed to load results", error);
-    }
+    } catch (e) { console.error('Failed to load results', e); }
   };
 
+  // Start a new analysis (from Home module cards or nav)
+  const startNew = (module = null, file = null) => {
+    setAnalysisModule(module);
+    setExistingFile(file);
+    setActiveTab('New Analysis');
+  };
+
+  // Called by NewAnalysis when SSE completes
+  const onAnalysisComplete = (data) => {
+    setAnalysisData(data);
+    setLastTab('Home');
+    setActiveTab('AnalysisReport');
+    setExistingFile(null);
+    setAnalysisModule(null);
+  };
+
+  if (authChecking) {
+    return <div className="h-screen w-full" style={{ background: 'var(--sky-bg)' }} />;
+  }
+
   return (
-    <div className="flex h-screen bg-white dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-200 relative transition-colors duration-300">
+    <div className="min-h-screen" style={{ background: 'var(--sky-bg)', color: 'var(--sky-ink)', fontFamily: 'var(--font-body)' }}>
+      <AppNav
+        activeTab={activeTab} setActiveTab={(t) => { setActiveTab(t); }}
+        user={user} isDark={isDark} setIsDark={setIsDark}
+        modelChoice={modelChoice} onModelChange={handleModelChange}
+        onLogout={handleLogout}
+      />
 
-      {/* 1. SIDEBAR */}
-      <aside className="w-64 border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col justify-between overflow-y-auto transition-colors duration-300">
-        <div>
-          <div className="p-5 flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('Home')}>
-            <div className="w-6 h-6 bg-gradient-to-br from-cyan-400 to-blue-500 rounded flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-            </div>
-            <span className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">SkyInnovators</span>
-          </div>
-
-          <div className="px-4 pb-4">
-            <button
-              onClick={() => { 
-                setActiveAnalysisData(null); // Ensure a clean state for new uploads
-                setActiveAnalysisModule(null); 
-                setIsUploadModalOpen(true); 
-              }}
-              className="w-full bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-              New Analysis
-            </button>
-          </div>
-
-          <nav className="px-3 space-y-1">
-            <NavItem icon="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" label="Home" active={activeTab === 'Home'} onClick={() => setActiveTab('Home')} />
-            <NavItem icon="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" label="Projects" active={activeTab === 'Projects'} onClick={() => setActiveTab('Projects')} />
-            <NavItem icon="M13 10V3L4 14h7v7l9-11h-7z" label="AI Models" badge="Beta" active={activeTab === 'AI Models'} onClick={() => setActiveTab('AI Models')} />
-          </nav>
-
-          <div className="px-3 mt-6">
-            <p className="px-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Assets</p>
-            <nav className="space-y-1">
-              <NavItem icon="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2-2v12a2 2 0 002 2z" label="Media Library" active={activeTab === 'Media Library'} onClick={() => setActiveTab('Media Library')} />
-              <NavItem icon="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" label="Telemetry Data" active={activeTab === 'Telemetry Data'} onClick={() => setActiveTab('Telemetry Data')} />
-              <NavItem icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" label="Exported Reports" active={activeTab === 'Exported Reports'} onClick={() => setActiveTab('Exported Reports')} />
-            </nav>
-          </div>
-        </div>
-
-        {/* User Profile Area */}
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800 relative">
-          <div
-            onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-            className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
-          >
-            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-300 uppercase">
-              {user.name ? user.name.charAt(0) : 'U'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{user.name}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
-            </div>
-            <svg className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" />
-            </svg>
-          </div>
-
-          {isProfileMenuOpen && (
-            <div className="absolute bottom-full left-4 mb-2 w-56 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-xl z-50 animate-fade-in overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-50 dark:border-gray-700">
-                <p className="text-sm text-gray-900 dark:text-white font-medium">{user.name}</p>
-              </div>
-              <div className="py-2">
-                <button
-                  onClick={() => { setActiveTab('Settings'); setIsProfileMenuOpen(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-cyan-600 dark:hover:text-cyan-400 flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                  Account Settings
-                </button>
-              </div>
-              <div className="border-t border-gray-50 dark:border-gray-700 py-2">
-                <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                  Log Out
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* 2. MAIN CONTENT AREA */}
-      <main className="flex-1 overflow-y-auto bg-gray-50/30 dark:bg-gray-900 transition-colors duration-300">
-        <header className="flex justify-between items-center px-8 py-4 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 sticky top-0 z-10 transition-colors duration-300">
-          <div className="flex items-center gap-4">
-            <button 
-                onClick={() => setActiveTab('Home')}
-                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
-            >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Model Selector — segmented toggle */}
-            <div
-              className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-full p-0.5 border border-gray-200 dark:border-gray-700"
-              title="Choose which AI model to use for analysis"
-            >
-              <button
-                onClick={() => handleModelChange('segformer')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-                  modelChoice === 'segformer'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
-              >
-                SeG-V1
-              </button>
-              <button
-                onClick={() => handleModelChange('ensemble')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-                  modelChoice === 'ensemble'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
-              >
-                SeG-V2
-              </button>
-            </div>
-
-            <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              {isDarkMode ? (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-              )}
-            </button>
-            <button className="border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium py-1.5 px-4 rounded-full text-sm transition-colors">
-              Documentation
-            </button>
-          </div>
-        </header>
-
-        {/* --- DYNAMIC TAB CONTENT --- */}
-        {activeTab === 'Projects' && (
-            <Projects 
-                onAnalyze={(file) => {
-                    // 👉 FIXED: Pass the existing file to trigger analysis mode
-                    setActiveAnalysisData(file); 
-                    setActiveAnalysisModule(null); 
-                    setIsUploadModalOpen(true); 
-                }}
-                onView={(file) => handleViewAnalysis(file)} 
-            />
+      <main className="pb-24 lg:pb-10">
+        {activeTab === 'Home' && <HomeView stats={stats} onStart={startNew} setActiveTab={setActiveTab} />}
+        {activeTab === 'New Analysis' && (
+          <NewAnalysis existingFile={existingFile} preselectedModule={analysisModule} onComplete={onAnalysisComplete} />
         )}
-        
         {activeTab === 'Media Library' && (
-          <MediaLibrary 
-            onAnalyze={(file) => {
-              // 👉 FIXED: Same logic for library as projects
-              setActiveAnalysisData(file);
-              setActiveAnalysisModule(null);
-              setIsUploadModalOpen(true);
-            }}
-            onView={(data) => handleViewAnalysis(data)}
-          />
+          <MediaLibrary onAnalyze={(file) => startNew(null, file)} onView={viewAnalysis} />
         )}
-        
-        {activeTab === 'AI Models' && <AIModels />}
-        {activeTab === 'Telemetry Data' && <TelemetryData />}
-        {activeTab === 'Exported Reports' && <ExportedReports />}
+        {activeTab === 'Projects' && (
+          <Projects onAnalyze={(file) => startNew(null, file)} onView={viewAnalysis} />
+        )}
+        {activeTab === 'Telemetry' && <TelemetryData />}
+        {activeTab === 'Reports' && <ExportedReports />}
         {activeTab === 'Settings' && <AccountSettings />}
-        {activeTab === 'AnalysisReport' && <AnalysisReport analysisData={activeAnalysisData} onBack={() => setActiveTab(lastTab)} />}
-
-        {activeTab === 'Home' && (
-          <div className="max-w-6xl mx-auto p-6 animate-fade-in">
-            {/* HERO BANNER */}
-            <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-800 dark:to-gray-800 rounded-2xl p-6 mb-6 border border-gray-200 dark:border-gray-700 flex justify-between items-center relative overflow-hidden transition-colors duration-300">
-              <div className="max-w-lg relative z-10">
-                <span className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-bold px-2 py-1 rounded text-gray-600 dark:text-gray-300 mb-3 inline-block uppercase tracking-wider">GeoNet 2.0</span>
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2 leading-tight">
-                  Advanced Land Cover <br /> <span className="text-cyan-500">Mapping & Analysis</span>
-                </h1>
-                <p className="text-gray-500 dark:text-gray-400 mb-5 text-xs sm:text-sm leading-relaxed">
-                  Automatically detect forest cover across your <span className="font-bold text-gray-900 dark:text-white">{stats.total_projects}</span> active projects. 
-                  You have processed <span className="font-bold text-gray-900 dark:text-white">{stats.total_files}</span> assets covering <span className="font-bold text-cyan-500">{stats.total_area_scanned}</span> to date.
-                </p>
-                <button
-                  onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule(null); setIsUploadModalOpen(true); }}
-                  className="bg-gray-900 dark:bg-cyan-600 hover:bg-gray-800 dark:hover:bg-cyan-700 text-white font-medium py-2 px-5 rounded-full text-sm transition-colors flex items-center gap-2"
-                >
-                  Start New Analysis <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-                </button>
-              </div>
-              <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-cyan-100/50 dark:from-cyan-900/20 to-transparent"></div>
-            </div>
-
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Analysis Modules</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <ActionCard
-                icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                iconColor="text-emerald-600 dark:text-emerald-400" iconBg="bg-emerald-50 dark:bg-emerald-500/10"
-                title="Forestry & Environment" desc="Map healthy forest cover and track active deforestation zones."
-                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('forestry'); setIsUploadModalOpen(true); }}
-              />
-              <ActionCard
-                icon="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
-                iconColor="text-amber-500 dark:text-amber-400" iconBg="bg-amber-50 dark:bg-amber-500/10"
-                title="Land & Vegetation" desc="Calculate vegetation density and identify exposed bare soil."
-                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('land'); setIsUploadModalOpen(true); }}
-              />
-              <ActionCard
-                icon="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
-                iconColor="text-blue-500 dark:text-blue-400" iconBg="bg-blue-50 dark:bg-blue-500/10"
-                title="Infrastructure & Hydrology" desc="Detect road networks and map natural water bodies."
-                onClick={() => { setActiveAnalysisData(null); setActiveAnalysisModule('infrastructure'); setIsUploadModalOpen(true); }}
-              />
-            </div>
-          </div>
+        {activeTab === 'AnalysisReport' && (
+          <AnalysisReport analysisData={analysisData} onBack={() => setActiveTab(lastTab)} />
         )}
       </main>
-
-      {/* 3. UPLOAD MODAL */}
-      {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 dark:bg-black/80 backdrop-blur-sm animate-fade-in p-4 sm:p-6 transition-colors">
-          <div className="absolute inset-0" onClick={() => setIsUploadModalOpen(false)}></div>
-          <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl w-full max-w-3xl relative z-10 flex flex-col max-h-[90vh] overflow-hidden border border-gray-100 dark:border-gray-700 transition-colors">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 z-20">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                {activeAnalysisData?.id ? 'Analyze Existing Asset' : 'Configure Analysis'}
-              </h3>
-              <button onClick={() => setIsUploadModalOpen(false)} className="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-500 dark:text-gray-400 transition-colors">
-                ✕
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto">
-              <UploadZone
-                // 👉 FIXED: Pass existingFile to UploadZone
-                existingFile={activeAnalysisData?.id ? activeAnalysisData : null}
-                preselectedModule={activeAnalysisModule}
-                onUploadSuccess={(data) => {
-                  setActiveAnalysisData(data);
-                  setIsUploadModalOpen(false);
-                  setActiveTab('AnalysisReport');
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function NavItem({ icon, label, badge, active, onClick }) {
+// ── HOME ──────────────────────────────────────────────────────────────────────
+function HomeView({ stats, onStart, setActiveTab }) {
+  const MODS = [
+    { key: 'forestry', title: 'Forestry & Environment', desc: 'Map healthy canopy and flag stressed or dead trees.', color: '#22c55e', bg: 'rgba(34,197,94,0.12)',
+      icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { key: 'land', title: 'Land & Vegetation', desc: 'Measure low vegetation and exposed bare soil.', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',
+      icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
+    { key: 'infrastructure', title: 'Infrastructure & Hydrology', desc: 'Detect roads, buildings and water bodies.', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)',
+      icon: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7' },
+  ];
   return (
-    <div
-      onClick={onClick}
-      className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-colors ${active
-        ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-medium'
-        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'
-        }`}
-    >
-      <div className="flex items-center gap-3">
-        <svg className={`w-5 h-5 ${active ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon} />
-        </svg>
-        <span className="text-sm">{label}</span>
+    <div className="max-w-[1200px] mx-auto px-6 py-8 animate-fade-in">
+      {/* Hero banner */}
+      <div className="rounded-3xl p-8 mb-8 relative overflow-hidden"
+           style={{ background: 'var(--sky-bg-soft)', border: '1px solid var(--sky-line)' }}>
+        <div className="absolute inset-0 pointer-events-none" style={{ background: 'var(--sky-hero-glow)' }} />
+        <div className="relative z-[2] max-w-xl">
+          <h1 className="text-[26px] sm:text-[32px] font-bold tracking-tight mb-2 leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--sky-ink)' }}>
+            Advanced land-cover<br /><span style={{ background: 'linear-gradient(120deg, var(--sky-accent), var(--sky-accent-2))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>mapping &amp; analysis</span>
+          </h1>
+          <p className="text-[14px] mb-5 leading-relaxed" style={{ color: 'var(--sky-ink-soft)' }}>
+            Detect forest health across your <b style={{ color: 'var(--sky-ink)' }}>{stats.total_projects}</b> projects. You've processed <b style={{ color: 'var(--sky-accent)' }}>{stats.total_files}</b> media {stats.total_files === 1 ? 'file' : 'files'} — images &amp; videos.
+          </p>
+          <button onClick={() => onStart(null, null)}
+            className="text-[14px] font-semibold px-6 py-3 rounded-full text-white inline-flex items-center gap-2 transition-transform hover:-translate-y-0.5"
+            style={{ background: 'linear-gradient(135deg, var(--sky-accent), var(--sky-accent-2))' }}>
+            Start new analysis
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+          </button>
+        </div>
       </div>
-      {badge && <span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">{badge}</span>}
-    </div>
-  )
-}
 
-function ActionCard({ icon, iconColor, iconBg, title, desc, onClick }) {
-  return (
-    <div onClick={onClick} className="border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-2xl p-4 flex gap-4 cursor-pointer hover:shadow-md hover:border-cyan-100 dark:hover:border-cyan-900/50 transition-all group h-full">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${iconBg} ${iconColor}`}>
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon} />
-        </svg>
-      </div>
-      <div>
-        <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">{title}</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug">{desc}</p>
+      <h2 className="text-[18px] font-bold mb-4 tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--sky-ink)' }}>Analysis modules</h2>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {MODS.map(m => (
+          <button key={m.key} onClick={() => onStart(m.key, null)}
+            className="text-left rounded-2xl p-5 flex gap-4 transition-all hover:-translate-y-1"
+            style={{ background: 'var(--sky-card)', border: '1px solid var(--sky-line)' }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--sky-accent)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--sky-line)'}>
+            <div className="w-10 h-10 rounded-xl grid place-items-center shrink-0" style={{ background: m.bg, color: m.color }}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d={m.icon} /></svg>
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--sky-ink)' }}>{m.title}</h3>
+              <p className="text-[13px] leading-snug" style={{ color: 'var(--sky-ink-soft)' }}>{m.desc}</p>
+            </div>
+          </button>
+        ))}
       </div>
     </div>
-  )
+  );
 }

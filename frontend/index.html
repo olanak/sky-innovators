@@ -4,7 +4,20 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+    <title>SkyInnovators — Drone Forest Intelligence</title>
+    <script>
+      // Apply theme before paint to avoid a flash. Dark is the default.
+      (function () {
+        try {
+          var t = sessionStorage.getItem('sky_theme');
+          if (t === 'light') { document.documentElement.classList.remove('dark'); }
+          else { document.documentElement.classList.add('dark'); } // dark default
+        } catch (e) { document.documentElement.classList.add('dark'); }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

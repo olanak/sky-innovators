@@ -1,20 +1,65 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
-@media print {
-  /* Hide the sidebar, header, and buttons when printing */
-  aside, header, .no-print, button {
-    display: none !important;
-  }
-  
-  /* Reset the main container for full page width */
-  main {
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100% !important;
-  }
+/* ============================================================
+   SkyInnovators design tokens
+   Light  = Deflexai-inspired (clean white, cyan accent)
+   Dark   = Fusion AI-inspired (deep violet-black, magenta glow)
+   Exposed as CSS variables so both Tailwind classes and custom
+   CSS can read them. Dark is the default (see main.jsx bootstrap).
+   ============================================================ */
+:root {
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
 
-  .animate-fade-in {
-    animation: none !important;
-  }
+  /* Light theme — Deflexai-style: ink-led monochrome with indigo-violet accent */
+  --sky-bg: #ffffff;
+  --sky-bg-soft: #f6f6f8;
+  --sky-ink: #0d0f1c;
+  --sky-ink-soft: #63677a;
+  --sky-line: #e9e9ef;
+  --sky-accent: #6366f1;
+  --sky-accent-2: #8b5cf6;
+  --sky-card: #ffffff;
+  --sky-pill: #f2f2f6;
+  --sky-orbit: #ededf2;
+  --sky-hero-glow: radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.08), transparent 60%);
+}
+
+html.dark {
+  /* Dark theme */
+  --sky-bg: #0a0714;
+  --sky-bg-soft: #120b22;
+  --sky-ink: #f4f1fb;
+  --sky-ink-soft: #a99fc4;
+  --sky-line: #241a3d;
+  --sky-accent: #b14dff;
+  --sky-accent-2: #e838c8;
+  --sky-card: #150c28;
+  --sky-pill: #1c1235;
+  --sky-orbit: #241a3d;
+  --sky-hero-glow: radial-gradient(ellipse at 50% 55%, rgba(177,77,255,0.22), transparent 60%);
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--sky-bg);
+  color: var(--sky-ink);
+  -webkit-font-smoothing: antialiased;
+  transition: background .4s ease, color .4s ease;
+}
+
+/* Fade-in used across app */
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.animate-fade-in { animation: fade-in .4s ease both; }
+
+/* Orbit signature animation */
+@keyframes sky-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.sky-rotating { animation: sky-spin 40s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .sky-rotating { animation: none; } }
+
+@media print {
+  aside, header, .no-print, button { display: none !important; }
+  main { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+  .animate-fade-in { animation: none !important; }
 }
