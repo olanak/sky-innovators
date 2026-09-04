@@ -26,7 +26,7 @@ HF_TOKEN        = os.getenv("HF_TOKEN", "")
 MODEL_API_URL_ENSEMBLE = os.getenv("MODEL_API_URL_ENSEMBLE", "").rstrip("/")
 HF_TOKEN_ENSEMBLE      = os.getenv("HF_TOKEN_ENSEMBLE", "")
 
-FRAME_STEP      = int(os.getenv("FRAME_STEP", 30))    # default 30 = 1fps at 30fps video
+FRAME_STEP      = int(os.getenv("FRAME_STEP", 160))    # default 30 = 1fps at 30fps video
 REQUEST_TIMEOUT = int(os.getenv("MODEL_TIMEOUT", 120))
 
 
