@@ -26,7 +26,7 @@ HF_TOKEN        = os.getenv("HF_TOKEN", "")
 MODEL_API_URL_ENSEMBLE = os.getenv("MODEL_API_URL_ENSEMBLE", "").rstrip("/")
 HF_TOKEN_ENSEMBLE      = os.getenv("HF_TOKEN_ENSEMBLE", "")
 
-FRAME_STEP      = int(os.getenv("FRAME_STEP", 160))    # default 30 = 1fps at 30fps video
+FRAME_STEP      = int(os.getenv("FRAME_STEP", 30))    # default 30 = 1fps at 30fps video
 REQUEST_TIMEOUT = int(os.getenv("MODEL_TIMEOUT", 120))
 
 
@@ -80,13 +80,13 @@ def _encode_frame_as_jpg(bgr: np.ndarray) -> bytes:
     return encoded.tobytes()
 
 
-def _call_predict(bgr: np.ndarray, model: str = "segformer") -> dict:
+def _call_predict(bgr: np.ndarray, model: str = "segformer", media_type: str = "image") -> dict:
     """POST one frame to the chosen Space's /predict endpoint."""
     api_url, token = _get_model_endpoint(model)
     _check_api_url(api_url)
 
     import sys
-    sys.stdout.write(f"[SkyInnovators] → /predict  model={model}  url={api_url}\n")
+    sys.stdout.write(f"[SkyInnovators] → /predict  model={model}  url={api_url} media={media_type}\n")
     sys.stdout.flush()
 
     jpg_bytes = _encode_frame_as_jpg(bgr)
@@ -97,7 +97,7 @@ def _call_predict(bgr: np.ndarray, model: str = "segformer") -> dict:
 
     try:
         response = http.post(
-            f"{api_url}/predict",
+            f"{api_url}/predict?media_type={media_type}",
             data=jpg_bytes,
             headers=headers,
             timeout=REQUEST_TIMEOUT,
@@ -114,7 +114,6 @@ def _call_predict(bgr: np.ndarray, model: str = "segformer") -> dict:
             f"Model API timed out after {REQUEST_TIMEOUT}s (model={model}). "
             "Try increasing MODEL_TIMEOUT in your environment variables."
         )
-
 
 # ── Video reading ─────────────────────────────────────────────────────────────
 
@@ -299,13 +298,12 @@ def run_ai_logic(filename: str, modules: list[str], model: str = "segformer") ->
     """
     Runs model on the first frame and returns scalar metrics.
     Called once per upload from main.py.
-
-    The `model` argument selects which HF Space to call:
-      "segformer" → MODEL_API_URL          (default, SegFormer-only)
-      "ensemble"  → MODEL_API_URL_ENSEMBLE  (Hybrid Ensemble)
     """
     file_path = os.path.join(UPLOAD_DIR, filename)
     is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
+    
+    # Define media_type based on the regex check
+    m_type = "video" if is_video else "image"
 
     if is_video:
         bgr = _read_first_video_frame(file_path)
@@ -314,7 +312,8 @@ def run_ai_logic(filename: str, modules: list[str], model: str = "segformer") ->
         if bgr is None:
             raise RuntimeError(f"Cannot read image: {filename}")
 
-    result = _call_predict(bgr, model=model)
+    # Pass it to the predict function
+    result = _call_predict(bgr, model=model, media_type=m_type)
     all_metrics = result.get("metrics", {})
     return {
         mod: all_metrics[mod]
@@ -329,24 +328,21 @@ def generate_segmentation_for_media(
     model:    str = "segformer",
 ) -> list[dict]:
     """
-    Runs the model on sampled frames and returns the frames list
-    for save_segmentation_frames() to persist to the DB.
-
-    Image  → 1 frame at timestamp_ms = 0
-    Video  → up to MAX_FRAMES frames, sampled every FRAME_STEP frames
-
-    The `model` argument selects which HF Space to call (see run_ai_logic).
+    Runs the model on sampled frames and returns the frames list.
     """
     file_path = os.path.join(UPLOAD_DIR, filename)
     is_video  = bool(re.search(r"\.(mp4|mov|webm|avi)$", filename, re.IGNORECASE))
     frames    = []
+    
+    # Define media_type based on the regex check
+    m_type = "video" if is_video else "image"
 
     if not is_video:
         bgr = cv2.imread(file_path)
         if bgr is None:
             raise RuntimeError(f"Cannot read image: {filename}")
 
-        result = _call_predict(bgr, model=model)
+        result = _call_predict(bgr, model=model, media_type=m_type)
         frames.append({
             "timestamp_ms": 0,
             "segments":     result.get("segments", []),
@@ -364,7 +360,7 @@ def generate_segmentation_for_media(
         ):
             ts_ms = int((frame_index / fps) * 1000)
             try:
-                result = _call_predict(bgr_frame, model=model)
+                result = _call_predict(bgr_frame, model=model, media_type=m_type)
                 frames.append({
                     "timestamp_ms": ts_ms,
                     "segments":     result.get("segments", []),
